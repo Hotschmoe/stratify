@@ -15,7 +15,10 @@
       "Bash(git commit:*)",
       "Bash(cargo search:*)",
       "Bash(cargo run:*)",
-      "Bash(cargo fix:*)"
+      "Bash(cargo fix:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(ls -la \"C:\\Users\\hotschmoe\\Documents\\GitHub\\Stratify\\calc_core\\src\\calculations\"\" 2>/dev/null || ls -la \"C:UsershotschmoeDocumentsGitHubStratifycalc_coresrc\"\")"
     ]
   }
 }
