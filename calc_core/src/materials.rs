@@ -44,6 +44,15 @@ pub enum WoodSpecies {
 }
 
 impl WoodSpecies {
+    /// All wood species variants for UI selection
+    pub const ALL: [WoodSpecies; 5] = [
+        WoodSpecies::DouglasFirLarch,
+        WoodSpecies::SouthernPine,
+        WoodSpecies::HemFir,
+        WoodSpecies::SprucePineFir,
+        WoodSpecies::DouglasFirSouth,
+    ];
+
     /// Parse from common string representations
     pub fn from_str_flexible(s: &str) -> CalcResult<Self> {
         match s.to_uppercase().replace([' ', '_'], "-").as_str() {
@@ -65,6 +74,12 @@ impl WoodSpecies {
             WoodSpecies::SprucePineFir => "Spruce-Pine-Fir",
             WoodSpecies::DouglasFirSouth => "Douglas Fir-South",
         }
+    }
+}
+
+impl std::fmt::Display for WoodSpecies {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
     }
 }
 
@@ -94,6 +109,18 @@ pub enum WoodGrade {
 }
 
 impl WoodGrade {
+    /// All wood grade variants for UI selection
+    pub const ALL: [WoodGrade; 8] = [
+        WoodGrade::SelectStructural,
+        WoodGrade::No1,
+        WoodGrade::No2,
+        WoodGrade::No3,
+        WoodGrade::Stud,
+        WoodGrade::Construction,
+        WoodGrade::Standard,
+        WoodGrade::Utility,
+    ];
+
     /// Parse from common string representations
     pub fn from_str_flexible(s: &str) -> CalcResult<Self> {
         match s.to_uppercase().replace([' ', '.', '#'], "").as_str() {
@@ -121,6 +148,12 @@ impl WoodGrade {
             WoodGrade::Standard => "Standard",
             WoodGrade::Utility => "Utility",
         }
+    }
+}
+
+impl std::fmt::Display for WoodGrade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
     }
 }
 
