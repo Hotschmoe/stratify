@@ -34,7 +34,9 @@ fs2 = "0.4"
 rust-embed = "8.0"
 
 # PDF generation via Typst
-typst = "0.12"
+typst = "0.14"
+typst-pdf = "0.14"
+typst-assets = { version = "0.14", features = ["fonts"] }
 
 # GUI (Iced)
 iced = { version = "0.13", features = ["wgpu", "tokio"] }

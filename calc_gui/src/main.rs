@@ -8,15 +8,20 @@
 //! This is a placeholder. The GUI will be implemented in Phase 2 after
 //! calc_core functionality is validated.
 
+use std::fs;
+use std::path::Path;
+
 use calc_core::calculations::beam::{calculate, BeamInput};
 use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+use calc_core::pdf::render_beam_pdf;
 use calc_core::project::Project;
+use calc_core::file_io::save_project;
 
 fn main() {
     println!("Stratify GUI - Structural Engineering Suite");
     println!("============================================");
     println!();
-    println!("GUI not yet implemented. Running calc_core demo instead...");
+    println!("GUI not yet implemented. Running calc_core demo with PDF generation...");
     println!();
 
     // Demo: Create a project and run a beam calculation
@@ -74,18 +79,48 @@ fn main() {
             );
             println!();
             println!("Overall: {} (governed by {})",
-                if result.passes() { "PASS ✓" } else { "FAIL ✗" },
+                if result.passes() { "PASS" } else { "FAIL" },
                 result.governing_condition()
             );
+
+            // Generate PDF report
+            println!();
+            println!("Generating PDF report...");
+            match render_beam_pdf(&beam, &result, "Demo Engineer", "25-001") {
+                Ok(pdf_bytes) => {
+                    let pdf_path = Path::new("beam_report.pdf");
+                    match fs::write(pdf_path, &pdf_bytes) {
+                        Ok(_) => {
+                            println!("PDF saved to: {}", pdf_path.display());
+                            println!("PDF size: {} bytes", pdf_bytes.len());
+                        }
+                        Err(e) => println!("Failed to save PDF: {}", e),
+                    }
+                }
+                Err(e) => println!("PDF generation failed: {}", e),
+            }
+
+            // Add beam to project
+            project.add_item(calc_core::calculations::CalculationItem::Beam(beam));
         }
         Err(e) => {
             println!("Calculation error: {}", e);
         }
     }
 
-    // Add beam to project and show JSON
-    project.add_item(calc_core::calculations::CalculationItem::Beam(beam));
+    // Save project file
     println!();
-    println!("Project JSON:");
-    println!("{}", serde_json::to_string_pretty(&project).unwrap());
+    println!("Saving project file...");
+    let project_path = Path::new("demo_project.stf");
+    match save_project(&project, project_path) {
+        Ok(_) => println!("Project saved to: {}", project_path.display()),
+        Err(e) => println!("Failed to save project: {}", e),
+    }
+
+    println!();
+    println!("MVP Demo Complete!");
+    println!("  - Input parameters defined");
+    println!("  - Calculation executed");
+    println!("  - PDF report generated");
+    println!("  - Project file saved");
 }

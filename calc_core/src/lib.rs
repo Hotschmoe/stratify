@@ -31,15 +31,18 @@
 //! - [`units`] - Type-safe unit wrappers
 //! - [`errors`] - Structured error types
 //! - [`file_io`] - File operations with atomic saves and locking
+//! - [`pdf`] - PDF report generation with Typst
 
 pub mod calculations;
 pub mod errors;
 pub mod file_io;
 pub mod materials;
+pub mod pdf;
 pub mod project;
 pub mod units;
 
 // Re-export commonly used types at crate root for convenience
 pub use errors::{CalcError, CalcResult};
 pub use file_io::{save_project, load_project, FileLock};
+pub use pdf::render_beam_pdf;
 pub use project::{Project, ProjectMetadata, GlobalSettings};

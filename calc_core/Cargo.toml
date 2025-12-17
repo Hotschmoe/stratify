@@ -13,6 +13,11 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 fs2 = { workspace = true }
+typst = { workspace = true }
+typst-pdf = { workspace = true }
+typst-assets = { workspace = true }
+comemo = "0.4"
+ecow = "0.2"
 
 [dev-dependencies]
 # For testing
