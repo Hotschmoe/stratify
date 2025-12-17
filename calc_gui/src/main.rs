@@ -369,7 +369,7 @@ enum Message {
     // Editor selection
     SelectProjectInfo,
     SelectBeam(Uuid),
-    NewBeam,
+    CreateBeam, // Creates a new beam immediately and selects it
 
     // Beam input field changes
     BeamLabelChanged(String),
@@ -401,11 +401,8 @@ enum Message {
     PslGradeSelected(PslGrade),
 
     // Actions
-    AddOrUpdateBeam,
     DeleteSelectedBeam,
-    Calculate,
     ExportPdf,
-    ClearResults,
 
     // Keyboard events
     KeyPressed(Key, Modifiers),
@@ -507,101 +504,127 @@ impl App {
             Message::SelectBeam(id) => {
                 self.select_beam(id);
             }
-            Message::NewBeam => {
-                self.new_beam();
+            Message::CreateBeam => {
+                self.create_beam();
             }
 
-            // Beam fields
+            // Beam fields - all trigger live preview update
             Message::BeamLabelChanged(value) => {
-                self.beam_label = value;
+                self.beam_label = value.clone();
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::SpanChanged(value) => {
                 self.span_ft = value;
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::WidthChanged(value) => {
                 self.width_in = value;
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::DepthChanged(value) => {
                 self.depth_in = value;
+                self.auto_save_beam();
+                self.try_calculate();
             }
 
-            // Load table operations
+            // Load table operations - all trigger live preview update
             Message::AddLoad => {
                 self.load_table.push(LoadTableRow::new());
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::RemoveLoad(id) => {
                 self.load_table.retain(|row| row.id != id);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LoadTypeChanged(id, load_type) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.load_type = load_type;
                 }
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LoadDistributionChanged(id, dist) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.distribution = dist;
                 }
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LoadMagnitudeChanged(id, value) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.magnitude = value;
                 }
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LoadPositionChanged(id, value) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.position = value;
                 }
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LoadTributaryChanged(id, value) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.tributary_width = value;
                 }
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::IncludeSelfWeightToggled(value) => {
                 self.include_self_weight = value;
+                self.auto_save_beam();
+                self.try_calculate();
             }
 
+            // Material selection - all trigger live preview update
             Message::MaterialTypeSelected(material_type) => {
                 self.selected_material_type = material_type;
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::SpeciesSelected(species) => {
                 self.selected_species = Some(species);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::GradeSelected(grade) => {
                 self.selected_grade = Some(grade);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::GlulamClassSelected(class) => {
                 self.selected_glulam_class = Some(class);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::GlulamLayupSelected(layup) => {
                 self.selected_glulam_layup = Some(layup);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::LvlGradeSelected(grade) => {
                 self.selected_lvl_grade = Some(grade);
+                self.auto_save_beam();
+                self.try_calculate();
             }
             Message::PslGradeSelected(grade) => {
                 self.selected_psl_grade = Some(grade);
+                self.auto_save_beam();
+                self.try_calculate();
             }
 
             // Actions
-            Message::AddOrUpdateBeam => {
-                self.add_or_update_beam();
-            }
             Message::DeleteSelectedBeam => {
                 self.delete_selected_beam();
             }
-            Message::Calculate => {
-                self.run_calculation();
-            }
             Message::ExportPdf => {
                 self.export_pdf();
-            }
-            Message::ClearResults => {
-                self.calc_input = None;
-                self.result = None;
-                self.error_message = None;
-                self.diagram_cache.clear();
-                self.status = "Results cleared".to_string();
             }
         }
         Task::none()
@@ -803,50 +826,13 @@ impl App {
                     }
                 }
 
-                self.result = None;
                 self.error_message = None;
                 self.status = format!("Selected: {}", beam.label);
+
+                // Calculate immediately to show live preview
+                self.try_calculate();
             }
         }
-    }
-
-    fn new_beam(&mut self) {
-        self.selection = EditorSelection::Beam(None);
-        self.beam_label = "B-1".to_string();
-        self.span_ft = "12.0".to_string();
-        self.width_in = "1.5".to_string();
-        self.depth_in = "9.25".to_string();
-
-        // Reset to default load table
-        self.load_table = vec![
-            LoadTableRow {
-                id: Uuid::new_v4(),
-                load_type: LoadType::Dead,
-                distribution: DistributionType::UniformFull,
-                magnitude: "15.0".to_string(),
-                position: String::new(),
-                tributary_width: String::new(),
-            },
-            LoadTableRow {
-                id: Uuid::new_v4(),
-                load_type: LoadType::Live,
-                distribution: DistributionType::UniformFull,
-                magnitude: "40.0".to_string(),
-                position: String::new(),
-                tributary_width: String::new(),
-            },
-        ];
-        self.include_self_weight = true;
-
-        self.selected_material_type = MaterialType::SawnLumber;
-        self.selected_species = Some(WoodSpecies::DouglasFirLarch);
-        self.selected_grade = Some(WoodGrade::No2);
-        self.selected_glulam_class = Some(GlulamStressClass::F24_V4);
-        self.selected_glulam_layup = Some(GlulamLayup::Unbalanced);
-        self.selected_lvl_grade = Some(LvlGrade::Standard);
-        self.selected_psl_grade = Some(PslGrade::Standard);
-        self.result = None;
-        self.error_message = None;
     }
 
     /// Helper to get selected beam ID if any
@@ -854,133 +840,6 @@ impl App {
         match self.selection {
             EditorSelection::Beam(Some(id)) => Some(id),
             _ => None,
-        }
-    }
-
-    fn add_or_update_beam(&mut self) {
-        if !self.can_edit() {
-            self.status = "Cannot modify: file is read-only".to_string();
-            return;
-        }
-
-        // Parse and validate
-        let span_ft = match self.span_ft.parse::<f64>() {
-            Ok(v) if v > 0.0 => v,
-            _ => {
-                self.error_message = Some("Invalid span value".to_string());
-                return;
-            }
-        };
-        let width_in = match self.width_in.parse::<f64>() {
-            Ok(v) if v > 0.0 => v,
-            _ => {
-                self.error_message = Some("Invalid width value".to_string());
-                return;
-            }
-        };
-        let depth_in = match self.depth_in.parse::<f64>() {
-            Ok(v) if v > 0.0 => v,
-            _ => {
-                self.error_message = Some("Invalid depth value".to_string());
-                return;
-            }
-        };
-
-        // Build material based on selected type
-        let material = match self.selected_material_type {
-            MaterialType::SawnLumber => {
-                let species = match self.selected_species {
-                    Some(s) => s,
-                    None => {
-                        self.error_message = Some("Please select a wood species".to_string());
-                        return;
-                    }
-                };
-                let grade = match self.selected_grade {
-                    Some(g) => g,
-                    None => {
-                        self.error_message = Some("Please select a wood grade".to_string());
-                        return;
-                    }
-                };
-                Material::SawnLumber(WoodMaterial::new(species, grade))
-            }
-            MaterialType::Glulam => {
-                let stress_class = match self.selected_glulam_class {
-                    Some(c) => c,
-                    None => {
-                        self.error_message = Some("Please select a glulam stress class".to_string());
-                        return;
-                    }
-                };
-                let layup = match self.selected_glulam_layup {
-                    Some(l) => l,
-                    None => {
-                        self.error_message = Some("Please select a glulam layup".to_string());
-                        return;
-                    }
-                };
-                Material::Glulam(GlulamMaterial::new(stress_class, layup))
-            }
-            MaterialType::Lvl => {
-                let grade = match self.selected_lvl_grade {
-                    Some(g) => g,
-                    None => {
-                        self.error_message = Some("Please select an LVL grade".to_string());
-                        return;
-                    }
-                };
-                Material::Lvl(LvlMaterial::new(grade))
-            }
-            MaterialType::Psl => {
-                let grade = match self.selected_psl_grade {
-                    Some(g) => g,
-                    None => {
-                        self.error_message = Some("Please select a PSL grade".to_string());
-                        return;
-                    }
-                };
-                Material::Psl(PslMaterial::new(grade))
-            }
-        };
-
-        // Build load case from load table
-        let mut load_case = EnhancedLoadCase::new("Service Loads");
-        load_case.include_self_weight = self.include_self_weight;
-
-        for row in &self.load_table {
-            if let Some(load) = row.to_discrete_load() {
-                load_case = load_case.with_load(load);
-            }
-        }
-
-        if load_case.loads.is_empty() {
-            self.error_message = Some("At least one valid load is required".to_string());
-            return;
-        }
-
-        let beam = BeamInput {
-            label: self.beam_label.clone(),
-            span_ft,
-            load_case,
-            material,
-            width_in,
-            depth_in,
-        };
-
-        if let Some(id) = self.selected_beam_id() {
-            // Update existing beam
-            self.project.items.insert(id, CalculationItem::Beam(beam));
-            self.mark_modified();
-            self.error_message = None;
-            self.status = format!("Updated beam '{}'", self.beam_label);
-        } else {
-            // Add new beam
-            let id = self.project.add_item(CalculationItem::Beam(beam));
-            self.selection = EditorSelection::Beam(Some(id));
-            self.mark_modified();
-            self.error_message = None;
-            self.status = format!("Added beam '{}'", self.beam_label);
         }
     }
 
@@ -994,96 +853,227 @@ impl App {
             if let Some(item) = self.project.items.remove(&id) {
                 self.mark_modified();
                 self.status = format!("Deleted: {}", item.label());
-                self.new_beam(); // Reset to new beam state
+                // Select project info after deletion
+                self.selection = EditorSelection::ProjectInfo;
+                self.result = None;
+                self.calc_input = None;
             }
         } else {
             self.status = "No beam selected to delete".to_string();
         }
     }
 
-    fn run_calculation(&mut self) {
-        self.error_message = None;
+    /// Create a new beam immediately with default values and add to project
+    fn create_beam(&mut self) {
+        if !self.can_edit() {
+            self.status = "Cannot modify: file is read-only".to_string();
+            return;
+        }
 
-        // Parse inputs
+        // Generate unique label
+        let beam_count = self
+            .project
+            .items
+            .values()
+            .filter(|i| matches!(i, CalculationItem::Beam(_)))
+            .count();
+        let new_label = format!("B-{}", beam_count + 1);
+
+        // Create default load case
+        let load_case = EnhancedLoadCase::new("Service Loads")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 15.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Live, 40.0));
+
+        // Create beam with defaults
+        let beam = BeamInput {
+            label: new_label.clone(),
+            span_ft: 12.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+        };
+
+        // Add to project and get the ID
+        let id = self.project.add_item(CalculationItem::Beam(beam));
+        self.mark_modified();
+
+        // Select the new beam for editing
+        self.select_beam(id);
+        self.status = format!("Created beam '{}'", new_label);
+
+        // Try to calculate immediately
+        self.try_calculate();
+    }
+
+    /// Auto-save beam editor state to the currently selected beam (silent, no validation errors)
+    fn auto_save_beam(&mut self) {
+        if !self.can_edit() {
+            return;
+        }
+
+        // Only auto-save if we have an existing beam selected
+        let beam_id = match self.selection {
+            EditorSelection::Beam(Some(id)) => id,
+            _ => return,
+        };
+
+        // Try to build a valid beam from current state - silently fail if invalid
+        let span_ft = match self.span_ft.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => return, // Invalid, don't save
+        };
+        let width_in = match self.width_in.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => return,
+        };
+        let depth_in = match self.depth_in.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => return,
+        };
+
+        // Build material
+        let material = match self.selected_material_type {
+            MaterialType::SawnLumber => {
+                match (self.selected_species, self.selected_grade) {
+                    (Some(species), Some(grade)) => {
+                        Material::SawnLumber(WoodMaterial::new(species, grade))
+                    }
+                    _ => return,
+                }
+            }
+            MaterialType::Glulam => {
+                match (self.selected_glulam_class, self.selected_glulam_layup) {
+                    (Some(stress_class), Some(layup)) => {
+                        Material::Glulam(GlulamMaterial::new(stress_class, layup))
+                    }
+                    _ => return,
+                }
+            }
+            MaterialType::Lvl => {
+                match self.selected_lvl_grade {
+                    Some(grade) => Material::Lvl(LvlMaterial::new(grade)),
+                    None => return,
+                }
+            }
+            MaterialType::Psl => {
+                match self.selected_psl_grade {
+                    Some(grade) => Material::Psl(PslMaterial::new(grade)),
+                    None => return,
+                }
+            }
+        };
+
+        // Build load case from load table
+        let mut load_case = EnhancedLoadCase::new("Service Loads");
+        load_case.include_self_weight = self.include_self_weight;
+
+        for row in &self.load_table {
+            if let Some(load) = row.to_discrete_load() {
+                load_case = load_case.with_load(load);
+            }
+        }
+
+        // Need at least one load
+        if load_case.loads.is_empty() {
+            return;
+        }
+
+        let beam = BeamInput {
+            label: self.beam_label.clone(),
+            span_ft,
+            load_case,
+            material,
+            width_in,
+            depth_in,
+        };
+
+        // Update the beam in the project
+        self.project.items.insert(beam_id, CalculationItem::Beam(beam));
+        self.mark_modified();
+    }
+
+    /// Try to run calculation silently - no error messages for invalid input
+    fn try_calculate(&mut self) {
+        // Only calculate if we're editing a beam
+        if !matches!(self.selection, EditorSelection::Beam(_)) {
+            return;
+        }
+
+        // Try to parse inputs - silently return on invalid
         let span_ft = match self.span_ft.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => {
-                self.error_message = Some("Invalid span value".to_string());
+                self.result = None;
+                self.calc_input = None;
                 return;
             }
         };
-
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => {
-                self.error_message = Some("Invalid width value".to_string());
+                self.result = None;
+                self.calc_input = None;
                 return;
             }
         };
-
         let depth_in = match self.depth_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => {
-                self.error_message = Some("Invalid depth value".to_string());
+                self.result = None;
+                self.calc_input = None;
                 return;
             }
         };
 
-        // Build material based on selected type
+        // Build material
         let material = match self.selected_material_type {
             MaterialType::SawnLumber => {
-                let species = match self.selected_species {
-                    Some(s) => s,
-                    None => {
-                        self.error_message = Some("Please select a wood species".to_string());
+                match (self.selected_species, self.selected_grade) {
+                    (Some(species), Some(grade)) => {
+                        Material::SawnLumber(WoodMaterial::new(species, grade))
+                    }
+                    _ => {
+                        self.result = None;
+                        self.calc_input = None;
                         return;
                     }
-                };
-                let grade = match self.selected_grade {
-                    Some(g) => g,
-                    None => {
-                        self.error_message = Some("Please select a wood grade".to_string());
-                        return;
-                    }
-                };
-                Material::SawnLumber(WoodMaterial::new(species, grade))
+                }
             }
             MaterialType::Glulam => {
-                let stress_class = match self.selected_glulam_class {
-                    Some(c) => c,
-                    None => {
-                        self.error_message = Some("Please select a glulam stress class".to_string());
+                match (self.selected_glulam_class, self.selected_glulam_layup) {
+                    (Some(stress_class), Some(layup)) => {
+                        Material::Glulam(GlulamMaterial::new(stress_class, layup))
+                    }
+                    _ => {
+                        self.result = None;
+                        self.calc_input = None;
                         return;
                     }
-                };
-                let layup = match self.selected_glulam_layup {
-                    Some(l) => l,
-                    None => {
-                        self.error_message = Some("Please select a glulam layup".to_string());
-                        return;
-                    }
-                };
-                Material::Glulam(GlulamMaterial::new(stress_class, layup))
+                }
             }
             MaterialType::Lvl => {
-                let grade = match self.selected_lvl_grade {
-                    Some(g) => g,
+                match self.selected_lvl_grade {
+                    Some(grade) => Material::Lvl(LvlMaterial::new(grade)),
                     None => {
-                        self.error_message = Some("Please select an LVL grade".to_string());
+                        self.result = None;
+                        self.calc_input = None;
                         return;
                     }
-                };
-                Material::Lvl(LvlMaterial::new(grade))
+                }
             }
             MaterialType::Psl => {
-                let grade = match self.selected_psl_grade {
-                    Some(g) => g,
+                match self.selected_psl_grade {
+                    Some(grade) => Material::Psl(PslMaterial::new(grade)),
                     None => {
-                        self.error_message = Some("Please select a PSL grade".to_string());
+                        self.result = None;
+                        self.calc_input = None;
                         return;
                     }
-                };
-                Material::Psl(PslMaterial::new(grade))
+                }
             }
         };
 
@@ -1098,7 +1088,8 @@ impl App {
         }
 
         if load_case.loads.is_empty() {
-            self.error_message = Some("At least one valid load is required".to_string());
+            self.result = None;
+            self.calc_input = None;
             return;
         }
 
@@ -1112,22 +1103,17 @@ impl App {
             depth_in,
         };
 
-        // Run calculation using project's design method
+        // Run calculation
         let design_method = self.project.settings.design_method;
         match calculate(&input, design_method) {
             Ok(result) => {
-                let status = if result.passes() {
-                    "Calculation complete - PASS"
-                } else {
-                    "Calculation complete - FAIL"
-                };
-                self.status = status.to_string();
                 self.calc_input = Some(input);
                 self.result = Some(result);
-                self.diagram_cache.clear(); // Redraw diagrams
+                self.error_message = None;
+                self.diagram_cache.clear();
             }
-            Err(e) => {
-                self.error_message = Some(format!("Calculation error: {}", e));
+            Err(_) => {
+                // Silently clear results on calculation error
                 self.calc_input = None;
                 self.result = None;
             }
@@ -1315,7 +1301,7 @@ impl App {
         let beams_header = row![
             beams_header_btn,
             button(text("+").size(11))
-                .on_press(Message::NewBeam)
+                .on_press(Message::CreateBeam)
                 .padding(Padding::from([2, 6]))
                 .style(button::secondary),
         ]
@@ -1571,35 +1557,17 @@ impl App {
         ]
         .spacing(2);
 
-        let save_btn_text = if self.selected_beam_id().is_some() {
-            "Update Beam"
-        } else {
-            "Add Beam"
-        };
-
-        let mut action_buttons = row![
-            button(save_btn_text)
-                .on_press(Message::AddOrUpdateBeam)
-                .padding(Padding::from([6, 12])),
-            button("Calculate")
-                .on_press(Message::Calculate)
-                .padding(Padding::from([6, 12])),
-        ]
-        .spacing(6);
-
-        if self.selected_beam_id().is_some() {
-            action_buttons = action_buttons.push(
-                button("Delete")
+        // Only show Delete button for existing beams
+        let action_buttons = if self.selected_beam_id().is_some() {
+            row![
+                button("Delete Beam")
                     .on_press(Message::DeleteSelectedBeam)
                     .padding(Padding::from([6, 12])),
-            );
-        }
-
-        action_buttons = action_buttons.push(
-            button("Clear Results")
-                .on_press(Message::ClearResults)
-                .padding(Padding::from([6, 12])),
-        );
+            ]
+            .spacing(6)
+        } else {
+            row![].spacing(6)
+        };
 
         column![
             beam_section,
