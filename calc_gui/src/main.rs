@@ -6,11 +6,15 @@
 use std::path::PathBuf;
 
 use iced::keyboard::{self, Key, Modifiers};
+use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::{
     button, column, container, horizontal_rule, horizontal_space, pick_list, row, scrollable,
     text, text_input, vertical_space, Column,
 };
-use iced::{event, Alignment, Element, Event, Font, Length, Padding, Subscription, Task, Theme};
+use iced::{
+    event, Alignment, Color, Element, Event, Font, Length, Padding, Point, Rectangle, Renderer,
+    Subscription, Task, Theme,
+};
 use uuid::Uuid;
 
 use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
@@ -63,9 +67,11 @@ struct App {
     selected_species: Option<WoodSpecies>,
     selected_grade: Option<WoodGrade>,
 
-    // Calculation results
+    // Calculation results (store input too for diagram plotting)
+    calc_input: Option<BeamInput>,
     result: Option<BeamResult>,
     error_message: Option<String>,
+    diagram_cache: canvas::Cache,
 
     // Status message
     status: String,
@@ -87,8 +93,10 @@ impl Default for App {
             depth_in: "9.25".to_string(),
             selected_species: Some(WoodSpecies::DouglasFirLarch),
             selected_grade: Some(WoodGrade::No2),
+            calc_input: None,
             result: None,
             error_message: None,
+            diagram_cache: canvas::Cache::default(),
             status: "Ready - New Project".to_string(),
         }
     }
@@ -290,8 +298,10 @@ impl App {
                 self.export_pdf();
             }
             Message::ClearResults => {
+                self.calc_input = None;
                 self.result = None;
                 self.error_message = None;
+                self.diagram_cache.clear();
                 self.status = "Results cleared".to_string();
             }
         }
@@ -649,10 +659,13 @@ impl App {
                     "Calculation complete - FAIL"
                 };
                 self.status = status.to_string();
+                self.calc_input = Some(input);
                 self.result = Some(result);
+                self.diagram_cache.clear(); // Redraw diagrams
             }
             Err(e) => {
                 self.error_message = Some(format!("Calculation error: {}", e));
+                self.calc_input = None;
                 self.result = None;
             }
         }
@@ -931,14 +944,27 @@ impl App {
     }
 
     fn view_results_panel(&self) -> Element<'_, Message> {
-        let content = if let Some(ref error) = self.error_message {
+        let content: Column<'_, Message> = if let Some(ref error) = self.error_message {
             column![
                 text("Error").size(14),
                 vertical_space().height(8),
                 text(error).size(12).color([0.8, 0.2, 0.2]),
             ]
-        } else if let Some(ref result) = self.result {
-            self.view_calculation_results(result)
+        } else if let (Some(ref input), Some(ref result)) = (&self.calc_input, &self.result) {
+            let results_text = self.view_calculation_results(result);
+            let diagram_data = BeamDiagramData::from_calc(input, result);
+            let diagram = BeamDiagram::new(diagram_data);
+
+            let canvas_widget: Element<'_, Message> = Canvas::new(diagram)
+                .width(Length::Fill)
+                .height(Length::Fixed(340.0))
+                .into();
+
+            results_text
+                .push(vertical_space().height(15))
+                .push(text("Diagrams").size(14))
+                .push(vertical_space().height(8))
+                .push(canvas_widget)
         } else {
             self.view_project_summary()
         };
@@ -1089,4 +1115,435 @@ fn labeled_input<'a>(
     ]
     .align_y(Alignment::Center)
     .into()
+}
+
+// ============================================================================
+// Beam Diagram Rendering
+// ============================================================================
+
+/// Data needed to draw beam diagrams
+struct BeamDiagramData {
+    span_ft: f64,
+    load_plf: f64,
+    max_shear_lb: f64,
+    max_moment_ftlb: f64,
+    max_deflection_in: f64,
+}
+
+impl BeamDiagramData {
+    fn from_calc(input: &BeamInput, result: &BeamResult) -> Self {
+        Self {
+            span_ft: input.span_ft,
+            load_plf: input.uniform_load_plf,
+            max_shear_lb: result.max_shear_lb,
+            max_moment_ftlb: result.max_moment_ftlb,
+            max_deflection_in: result.max_deflection_in,
+        }
+    }
+
+    /// Shear at position x (0 to L): V(x) = w(L/2 - x)
+    #[allow(dead_code)]
+    fn shear_at(&self, x_ratio: f64) -> f64 {
+        let x = x_ratio * self.span_ft;
+        self.load_plf * (self.span_ft / 2.0 - x)
+    }
+
+    /// Moment at position x (0 to L): M(x) = w*x*(L-x)/2
+    fn moment_at(&self, x_ratio: f64) -> f64 {
+        let x = x_ratio * self.span_ft;
+        self.load_plf * x * (self.span_ft - x) / 2.0
+    }
+
+    /// Deflection ratio at position x (normalized 0-1, max at center)
+    /// δ(x) = wx(L³ - 2Lx² + x³)/(24EI) - simplified to shape
+    fn deflection_ratio_at(&self, x_ratio: f64) -> f64 {
+        // Normalized deflection shape for uniform load: x(1-x)(1+x-x²)
+        // Simplified: use polynomial that peaks at center
+        let x = x_ratio;
+        // Shape: 16x(1-x)(1-x+x) normalized to peak=1 at x=0.5
+        // Actual shape: x - 2x³ + x⁴ normalized
+        let shape = x * (1.0 - x) * (1.0 + x - x * x);
+        // Normalize so max = 1 (occurs at x=0.5)
+        shape / 0.3125 // 0.5 * 0.5 * 1.25 = 0.3125
+    }
+}
+
+/// Canvas program for drawing beam diagrams
+struct BeamDiagram {
+    data: BeamDiagramData,
+}
+
+impl canvas::Program<Message> for BeamDiagram {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+
+        let width = bounds.width;
+        let height = bounds.height;
+
+        // Layout: divide into 4 sections vertically
+        let section_height = height / 4.0;
+        let margin = 20.0;
+        let plot_width = width - 2.0 * margin;
+
+        // Colors
+        let beam_color = Color::from_rgb(0.3, 0.3, 0.3);
+        let shear_color = Color::from_rgb(0.2, 0.5, 0.8);
+        let moment_color = Color::from_rgb(0.8, 0.4, 0.2);
+        let defl_color = Color::from_rgb(0.2, 0.7, 0.3);
+        let axis_color = Color::from_rgb(0.5, 0.5, 0.5);
+
+        // Section 1: Beam schematic with uniform load
+        self.draw_beam_schematic(&mut frame, margin, 0.0, plot_width, section_height, beam_color);
+
+        // Section 2: Shear diagram
+        self.draw_shear_diagram(
+            &mut frame,
+            margin,
+            section_height,
+            plot_width,
+            section_height,
+            shear_color,
+            axis_color,
+        );
+
+        // Section 3: Moment diagram
+        self.draw_moment_diagram(
+            &mut frame,
+            margin,
+            section_height * 2.0,
+            plot_width,
+            section_height,
+            moment_color,
+            axis_color,
+        );
+
+        // Section 4: Deflection diagram
+        self.draw_deflection_diagram(
+            &mut frame,
+            margin,
+            section_height * 3.0,
+            plot_width,
+            section_height,
+            defl_color,
+            axis_color,
+        );
+
+        vec![frame.into_geometry()]
+    }
+}
+
+impl BeamDiagram {
+    fn new(data: BeamDiagramData) -> Self {
+        Self { data }
+    }
+
+    fn draw_beam_schematic(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Color,
+    ) {
+        let beam_y = y + height * 0.6;
+        let beam_thickness = 4.0;
+
+        // Draw beam line
+        let beam = Path::line(
+            Point::new(x, beam_y),
+            Point::new(x + width, beam_y),
+        );
+        frame.stroke(&beam, Stroke::default().with_color(color).with_width(beam_thickness));
+
+        // Draw pin support (left) - triangle
+        let support_size = 12.0;
+        let left_support = Path::new(|builder| {
+            builder.move_to(Point::new(x, beam_y + beam_thickness / 2.0));
+            builder.line_to(Point::new(x - support_size / 2.0, beam_y + support_size));
+            builder.line_to(Point::new(x + support_size / 2.0, beam_y + support_size));
+            builder.close();
+        });
+        frame.stroke(&left_support, Stroke::default().with_color(color).with_width(2.0));
+
+        // Draw roller support (right) - triangle with circle
+        let right_support = Path::new(|builder| {
+            builder.move_to(Point::new(x + width, beam_y + beam_thickness / 2.0));
+            builder.line_to(Point::new(x + width - support_size / 2.0, beam_y + support_size));
+            builder.line_to(Point::new(x + width + support_size / 2.0, beam_y + support_size));
+            builder.close();
+        });
+        frame.stroke(&right_support, Stroke::default().with_color(color).with_width(2.0));
+
+        // Draw uniform load arrows
+        let num_arrows = 8;
+        let arrow_spacing = width / (num_arrows as f32);
+        let arrow_length = height * 0.25;
+
+        for i in 0..=num_arrows {
+            let ax = x + i as f32 * arrow_spacing;
+            let arrow = Path::line(
+                Point::new(ax, beam_y - arrow_length),
+                Point::new(ax, beam_y - 5.0),
+            );
+            frame.stroke(&arrow, Stroke::default().with_color(color).with_width(1.5));
+
+            // Arrow head
+            let head = Path::new(|builder| {
+                builder.move_to(Point::new(ax, beam_y - 5.0));
+                builder.line_to(Point::new(ax - 3.0, beam_y - 10.0));
+                builder.move_to(Point::new(ax, beam_y - 5.0));
+                builder.line_to(Point::new(ax + 3.0, beam_y - 10.0));
+            });
+            frame.stroke(&head, Stroke::default().with_color(color).with_width(1.5));
+        }
+
+        // Load label
+        let load_text = Text {
+            content: format!("w = {:.0} plf", self.data.load_plf),
+            position: Point::new(x + width / 2.0, y + 8.0),
+            color,
+            size: iced::Pixels(10.0),
+            horizontal_alignment: iced::alignment::Horizontal::Center,
+            ..Text::default()
+        };
+        frame.fill_text(load_text);
+
+        // Span label
+        let span_text = Text {
+            content: format!("L = {:.1} ft", self.data.span_ft),
+            position: Point::new(x + width / 2.0, beam_y + support_size + 8.0),
+            color,
+            size: iced::Pixels(10.0),
+            horizontal_alignment: iced::alignment::Horizontal::Center,
+            ..Text::default()
+        };
+        frame.fill_text(span_text);
+    }
+
+    fn draw_shear_diagram(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Color,
+        axis_color: Color,
+    ) {
+        let center_y = y + height / 2.0;
+        let plot_height = height * 0.35;
+
+        // Axis line
+        let axis = Path::line(
+            Point::new(x, center_y),
+            Point::new(x + width, center_y),
+        );
+        frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
+
+        // Shear diagram: linear from +V to -V
+        let shear_path = Path::new(|builder| {
+            builder.move_to(Point::new(x, center_y - plot_height));
+            builder.line_to(Point::new(x + width, center_y + plot_height));
+            builder.line_to(Point::new(x + width, center_y));
+            builder.line_to(Point::new(x, center_y));
+            builder.close();
+        });
+        frame.fill(&shear_path, Color { a: 0.3, ..color });
+
+        let shear_line = Path::line(
+            Point::new(x, center_y - plot_height),
+            Point::new(x + width, center_y + plot_height),
+        );
+        frame.stroke(&shear_line, Stroke::default().with_color(color).with_width(2.0));
+
+        // Labels
+        let title = Text {
+            content: "Shear (V)".to_string(),
+            position: Point::new(x + 5.0, y + 5.0),
+            color,
+            size: iced::Pixels(10.0),
+            ..Text::default()
+        };
+        frame.fill_text(title);
+
+        let max_label = Text {
+            content: format!("+{:.0} lb", self.data.max_shear_lb),
+            position: Point::new(x + 5.0, center_y - plot_height - 2.0),
+            color,
+            size: iced::Pixels(9.0),
+            ..Text::default()
+        };
+        frame.fill_text(max_label);
+
+        let min_label = Text {
+            content: format!("-{:.0} lb", self.data.max_shear_lb),
+            position: Point::new(x + width - 50.0, center_y + plot_height + 10.0),
+            color,
+            size: iced::Pixels(9.0),
+            ..Text::default()
+        };
+        frame.fill_text(min_label);
+    }
+
+    fn draw_moment_diagram(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Color,
+        axis_color: Color,
+    ) {
+        let axis_y = y + height * 0.15;
+        let plot_height = height * 0.7;
+
+        // Axis line
+        let axis = Path::line(
+            Point::new(x, axis_y),
+            Point::new(x + width, axis_y),
+        );
+        frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
+
+        // Moment diagram: parabola (positive moment = sag below axis in convention)
+        let num_points = 50;
+        let moment_path = Path::new(|builder| {
+            builder.move_to(Point::new(x, axis_y));
+            for i in 0..=num_points {
+                let t = i as f64 / num_points as f64;
+                let m_ratio = self.data.moment_at(t) / self.data.max_moment_ftlb;
+                let px = x + (t as f32) * width;
+                let py = axis_y + (m_ratio as f32) * plot_height;
+                if i == 0 {
+                    builder.move_to(Point::new(px, py));
+                } else {
+                    builder.line_to(Point::new(px, py));
+                }
+            }
+            // Close back to axis
+            builder.line_to(Point::new(x + width, axis_y));
+            builder.line_to(Point::new(x, axis_y));
+            builder.close();
+        });
+        frame.fill(&moment_path, Color { a: 0.3, ..color });
+
+        // Parabola outline
+        let outline = Path::new(|builder| {
+            for i in 0..=num_points {
+                let t = i as f64 / num_points as f64;
+                let m_ratio = self.data.moment_at(t) / self.data.max_moment_ftlb;
+                let px = x + (t as f32) * width;
+                let py = axis_y + (m_ratio as f32) * plot_height;
+                if i == 0 {
+                    builder.move_to(Point::new(px, py));
+                } else {
+                    builder.line_to(Point::new(px, py));
+                }
+            }
+        });
+        frame.stroke(&outline, Stroke::default().with_color(color).with_width(2.0));
+
+        // Labels
+        let title = Text {
+            content: "Moment (M)".to_string(),
+            position: Point::new(x + 5.0, y + 5.0),
+            color,
+            size: iced::Pixels(10.0),
+            ..Text::default()
+        };
+        frame.fill_text(title);
+
+        let max_label = Text {
+            content: format!("{:.0} ft-lb", self.data.max_moment_ftlb),
+            position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
+            color,
+            size: iced::Pixels(9.0),
+            horizontal_alignment: iced::alignment::Horizontal::Center,
+            ..Text::default()
+        };
+        frame.fill_text(max_label);
+    }
+
+    fn draw_deflection_diagram(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Color,
+        axis_color: Color,
+    ) {
+        let axis_y = y + height * 0.15;
+        let plot_height = height * 0.6;
+
+        // Axis line (represents undeflected beam)
+        let axis = Path::line(
+            Point::new(x, axis_y),
+            Point::new(x + width, axis_y),
+        );
+        frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
+
+        // Deflection curve
+        let num_points = 50;
+        let defl_path = Path::new(|builder| {
+            for i in 0..=num_points {
+                let t = i as f64 / num_points as f64;
+                let d_ratio = self.data.deflection_ratio_at(t);
+                let px = x + (t as f32) * width;
+                let py = axis_y + (d_ratio as f32) * plot_height;
+                if i == 0 {
+                    builder.move_to(Point::new(px, py));
+                } else {
+                    builder.line_to(Point::new(px, py));
+                }
+            }
+        });
+        frame.stroke(&defl_path, Stroke::default().with_color(color).with_width(2.0));
+
+        // Fill under curve
+        let fill_path = Path::new(|builder| {
+            builder.move_to(Point::new(x, axis_y));
+            for i in 0..=num_points {
+                let t = i as f64 / num_points as f64;
+                let d_ratio = self.data.deflection_ratio_at(t);
+                let px = x + (t as f32) * width;
+                let py = axis_y + (d_ratio as f32) * plot_height;
+                builder.line_to(Point::new(px, py));
+            }
+            builder.line_to(Point::new(x + width, axis_y));
+            builder.close();
+        });
+        frame.fill(&fill_path, Color { a: 0.2, ..color });
+
+        // Labels
+        let title = Text {
+            content: "Deflection (δ)".to_string(),
+            position: Point::new(x + 5.0, y + 5.0),
+            color,
+            size: iced::Pixels(10.0),
+            ..Text::default()
+        };
+        frame.fill_text(title);
+
+        let max_label = Text {
+            content: format!("{:.3} in", self.data.max_deflection_in),
+            position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
+            color,
+            size: iced::Pixels(9.0),
+            horizontal_alignment: iced::alignment::Horizontal::Center,
+            ..Text::default()
+        };
+        frame.fill_text(max_label);
+    }
 }
