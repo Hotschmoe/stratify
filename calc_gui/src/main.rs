@@ -17,7 +17,7 @@ use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
 use calc_core::calculations::CalculationItem;
 use calc_core::file_io::{load_project, save_project, FileLock};
 use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
-use calc_core::pdf::render_beam_pdf;
+use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
 
 // Embed BerkeleyMono font at compile time
@@ -659,45 +659,37 @@ impl App {
     }
 
     fn export_pdf(&mut self) {
-        let result = match &self.result {
-            Some(r) => r,
-            None => {
-                self.status = "Run calculation first before exporting PDF".to_string();
-                return;
-            }
-        };
+        if self.project.items.is_empty() {
+            self.status = "No beams in project to export".to_string();
+            return;
+        }
 
-        // Build input for PDF
-        let input = BeamInput {
-            label: self.beam_label.clone(),
-            span_ft: self.span_ft.parse().unwrap_or(0.0),
-            uniform_load_plf: self.load_plf.parse().unwrap_or(0.0),
-            material: WoodMaterial::new(
-                self.selected_species.unwrap_or(WoodSpecies::DouglasFirLarch),
-                self.selected_grade.unwrap_or(WoodGrade::No2),
-            ),
-            width_in: self.width_in.parse().unwrap_or(0.0),
-            depth_in: self.depth_in.parse().unwrap_or(0.0),
-        };
-
-        // Generate PDF
-        match render_beam_pdf(
-            &input,
-            result,
-            &self.project.meta.engineer,
-            &self.project.meta.job_id,
-        ) {
+        // Generate PDF for all beams in project
+        match render_project_pdf(&self.project) {
             Ok(pdf_bytes) => {
+                // Default filename based on job ID or project name
+                let default_name = format!("{}_calculations.pdf", self.project.meta.job_id);
+
                 // Use file dialog to save
                 if let Some(path) = rfd::FileDialog::new()
-                    .set_title("Save PDF Report")
-                    .set_file_name(&format!("{}_beam_report.pdf", self.beam_label))
+                    .set_title("Export PDF Report")
+                    .set_file_name(&default_name)
                     .add_filter("PDF", &["pdf"])
                     .save_file()
                 {
                     match std::fs::write(&path, &pdf_bytes) {
                         Ok(_) => {
-                            self.status = format!("PDF saved to: {}", path.display());
+                            let beam_count = self
+                                .project
+                                .items
+                                .values()
+                                .filter(|i| matches!(i, CalculationItem::Beam(_)))
+                                .count();
+                            self.status = format!(
+                                "PDF exported: {} ({} beams)",
+                                path.display(),
+                                beam_count
+                            );
                         }
                         Err(e) => {
                             self.status = format!("Failed to save PDF: {}", e);
@@ -775,8 +767,11 @@ impl App {
             button("Save (Ctrl+S)")
                 .on_press(Message::SaveProject)
                 .padding(Padding::from([6, 10])),
-            button("Save As (Ctrl+Shift+S)")
+            button("Save As")
                 .on_press(Message::SaveProjectAs)
+                .padding(Padding::from([6, 10])),
+            button("Export PDF")
+                .on_press(Message::ExportPdf)
                 .padding(Padding::from([6, 10])),
         ]
         .spacing(6);
@@ -911,15 +906,11 @@ impl App {
             );
         }
 
-        let export_buttons = row![
-            button("Export PDF")
-                .on_press(Message::ExportPdf)
-                .padding(Padding::from([6, 12])),
-            button("Clear")
+        action_buttons = action_buttons.push(
+            button("Clear Results")
                 .on_press(Message::ClearResults)
                 .padding(Padding::from([6, 12])),
-        ]
-        .spacing(6);
+        );
 
         let panel = column![
             project_section,
@@ -929,8 +920,6 @@ impl App {
             material_section,
             vertical_space().height(15),
             action_buttons,
-            vertical_space().height(8),
-            export_buttons,
         ]
         .width(Length::FillPortion(2))
         .padding(8);
