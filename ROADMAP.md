@@ -4,15 +4,16 @@ This document outlines the phased development approach for Stratify, from initia
 
 ## Current Status
 
-**MVP COMPLETE!** ✓ (as of 2024-12-17)
+**GUI FOUNDATION COMPLETE!** ✓ (as of 2025-12-17)
 
-The core input → calculation → PDF pipeline is functional:
-- ✅ Beam input parameters
+The core input → calculation → PDF pipeline is functional with a GUI:
+- ✅ Beam input parameters (GUI form)
 - ✅ NDS calculations (moment, shear, deflection, unity checks)
 - ✅ Professional PDF report generation with Typst
 - ✅ Project file save/load with atomic writes and file locking
+- ✅ Iced 0.13 GUI with input form, material dropdowns, and PDF export
 
-**Next Priority**: GUI implementation with Iced framework
+**Next Priority**: Diagram rendering, file operations integration, and Project Explorer sidebar
 
 ---
 
@@ -151,25 +152,26 @@ The core input → calculation → PDF pipeline is functional:
   - [ ] Implement multi-page support for multiple calculations
   - [ ] Add page numbering and headers/footers
 
-### Week 7: GUI Foundation 🔲 NOT STARTED (NEXT PRIORITY)
+### Week 7: GUI Foundation ✅ COMPLETE
 
-- [ ] **GUI: Iced Setup**
-  - [ ] Add `iced` dependency
-  - [ ] Create basic application shell
-  - [ ] Set up window creation and event loop
-  - [ ] Test native compilation (Windows)
+- [x] **GUI: Iced Setup**
+  - [x] Add `iced` dependency (v0.13)
+  - [x] Create basic application shell
+  - [x] Set up window creation and event loop
+  - [x] Test native compilation (Windows)
 
-- [ ] **GUI: Layout Structure**
-  - [ ] Create "Project Explorer" sidebar (list of calculations)
-  - [ ] Create "Properties" panel (input fields)
-  - [ ] Create "Results" panel
-  - [ ] Implement resizable panels
+- [x] **GUI: Layout Structure**
+  - [ ] Create "Project Explorer" sidebar (list of calculations) - *not yet*
+  - [x] Create "Properties" panel (input fields)
+  - [x] Create "Results" panel
+  - [ ] Implement resizable panels - *not yet*
 
-- [ ] **GUI: Basic Widgets**
-  - [ ] Create text input widgets for beam parameters
-  - [ ] Create dropdown for material selection
-  - [ ] Create button widgets (Calculate, Save, Export PDF)
-  - [ ] Implement basic styling
+- [x] **GUI: Basic Widgets**
+  - [x] Create text input widgets for beam parameters
+  - [x] Create dropdown for material selection (pick_list)
+  - [x] Create button widgets (Calculate, Export PDF, Clear)
+  - [x] Implement basic styling (bordered panels, color-coded status)
+  - [x] Add file dialog for PDF export (rfd crate)
 
 ### Week 8: Graphics Rendering 🔲 NOT STARTED
 
