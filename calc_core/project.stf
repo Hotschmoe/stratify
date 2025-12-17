@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "version": "0.1.0",
+    "engineer": "Jane Engineer",
+    "job_id": "25-042",
+    "client": "ACME Corp",
+    "created": "2025-12-17T19:06:39.971306600Z",
+    "modified": "2025-12-17T19:06:39.971306600Z"
+  },
+  "settings": {
+    "code": "IBC2024",
+    "seismic_design_category": null,
+    "risk_category": "II",
+    "default_materials": {
+      "wood": "DF-L No.2",
+      "steel": "A992",
+      "concrete_fc_psi": 3000
+    }
+  },
+  "items": {}
+}
