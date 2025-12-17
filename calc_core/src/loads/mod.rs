@@ -31,6 +31,7 @@
 
 pub mod load_types;
 pub mod combinations;
+pub mod discrete;
 
 pub use load_types::LoadType;
 pub use combinations::{
@@ -38,6 +39,11 @@ pub use combinations::{
     asce7_asd_combinations,
     asce7_lrfd_combinations,
     find_governing_combination,
+};
+pub use discrete::{
+    LoadDistribution,
+    DiscreteLoad,
+    EnhancedLoadCase,
 };
 
 use std::collections::HashMap;

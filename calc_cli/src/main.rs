@@ -11,6 +11,7 @@
 use std::io::{self, BufRead, Write};
 
 use calc_core::calculations::beam::{calculate, BeamInput};
+use calc_core::loads::{DesignMethod, DiscreteLoad, EnhancedLoadCase, LoadType};
 use calc_core::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
 fn main() {
@@ -40,10 +41,17 @@ fn main() {
     println!("Calculating 2x10 DF-L No.2 beam...");
     println!();
 
+    // Create load case (assume 30% dead, 70% live for demo)
+    let dead_plf = load_plf * 0.3;
+    let live_plf = load_plf * 0.7;
+    let load_case = EnhancedLoadCase::new("Demo Loads")
+        .with_load(DiscreteLoad::uniform(LoadType::Dead, dead_plf))
+        .with_load(DiscreteLoad::uniform(LoadType::Live, live_plf));
+
     let beam = BeamInput {
         label: "CLI-Demo".to_string(),
         span_ft,
-        uniform_load_plf: load_plf,
+        load_case,
         material: Material::SawnLumber(WoodMaterial::new(
             WoodSpecies::DouglasFirLarch,
             WoodGrade::No2,
@@ -52,7 +60,7 @@ fn main() {
         depth_in: 9.25,
     };
 
-    match calculate(&beam) {
+    match calculate(&beam, DesignMethod::Asd) {
         Ok(result) => {
             println!("═══════════════════════════════════════");
             println!("  BEAM CALCULATION RESULTS");
@@ -60,7 +68,7 @@ fn main() {
             println!();
             println!("Input:");
             println!("  Span:     {:.1} ft", beam.span_ft);
-            println!("  Load:     {:.0} plf", beam.uniform_load_plf);
+            println!("  Load:     {:.0} plf (D={:.0}, L={:.0})", load_plf, dead_plf, live_plf);
             println!("  Section:  2x10 (1.5\" x 9.25\")");
             println!("  Material: DF-L No.2");
             println!();

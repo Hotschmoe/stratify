@@ -102,13 +102,18 @@ impl Project {
     /// use calc_core::project::Project;
     /// use calc_core::calculations::{CalculationItem, BeamInput};
     /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
+    /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
     ///
     /// let mut project = Project::new("Engineer", "25-001", "Client");
+    ///
+    /// let load_case = EnhancedLoadCase::new("Floor")
+    ///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
+    ///     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
     ///
     /// let beam = BeamInput {
     ///     label: "B-1".to_string(),
     ///     span_ft: 12.0,
-    ///     uniform_load_plf: 150.0,
+    ///     load_case,
     ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
     ///     width_in: 1.5,
     ///     depth_in: 9.25,
@@ -308,14 +313,19 @@ mod tests {
     #[test]
     fn test_add_remove_item() {
         use crate::calculations::{BeamInput, CalculationItem};
+        use crate::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
         use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
         let mut project = Project::new("Engineer", "25-001", "Client");
 
+        let load_case = EnhancedLoadCase::new("Test Loads")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
+
         let beam = BeamInput {
             label: "B-1".to_string(),
             span_ft: 12.0,
-            uniform_load_plf: 150.0,
+            load_case,
             material: Material::SawnLumber(WoodMaterial::new(
                 WoodSpecies::DouglasFirLarch,
                 WoodGrade::No2,

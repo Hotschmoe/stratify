@@ -3,13 +3,14 @@
 //! Full-featured graphical interface for structural engineering calculations.
 //! Built with Iced framework for cross-platform support (Windows, macOS, Linux, WASM).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::{
-    button, column, container, horizontal_rule, horizontal_space, pick_list, row, scrollable,
-    text, text_input, vertical_space, Column,
+    button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
+    scrollable, text, text_input, vertical_space, Column, Row,
 };
 use iced::{
     event, Alignment, Color, Element, Event, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -20,12 +21,17 @@ use uuid::Uuid;
 use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
 use calc_core::calculations::CalculationItem;
 use calc_core::file_io::{load_project, save_project, FileLock};
+use calc_core::loads::{DiscreteLoad, EnhancedLoadCase, LoadDistribution, LoadType};
 use calc_core::materials::{
     GlulamLayup, GlulamMaterial, GlulamStressClass, LvlGrade, LvlMaterial, Material, PslGrade,
     PslMaterial, WoodGrade, WoodMaterial, WoodSpecies,
 };
 use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
+
+// ============================================================================
+// UI Types
+// ============================================================================
 
 /// Material type for UI selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -53,6 +59,137 @@ impl std::fmt::Display for MaterialType {
             MaterialType::Glulam => write!(f, "Glulam"),
             MaterialType::Lvl => write!(f, "LVL"),
             MaterialType::Psl => write!(f, "PSL"),
+        }
+    }
+}
+
+/// Distribution type for UI dropdown
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DistributionType {
+    #[default]
+    UniformFull,
+    Point,
+    UniformPartial,
+}
+
+impl DistributionType {
+    pub const ALL: [DistributionType; 3] = [
+        DistributionType::UniformFull,
+        DistributionType::Point,
+        DistributionType::UniformPartial,
+    ];
+}
+
+impl std::fmt::Display for DistributionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DistributionType::UniformFull => write!(f, "Uniform"),
+            DistributionType::Point => write!(f, "Point"),
+            DistributionType::UniformPartial => write!(f, "Partial"),
+        }
+    }
+}
+
+/// Left panel section identifiers
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ItemSection {
+    ProjectInfo,
+    WoodBeams,
+    WoodColumns,
+    // Future sections (disabled in UI)
+    ContinuousFootings,
+    SpreadFootings,
+    CantileverWalls,
+    RestrainedWalls,
+}
+
+/// What is currently being edited in the middle panel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorSelection {
+    /// No selection - show welcome/instructions
+    None,
+    /// Editing project info
+    ProjectInfo,
+    /// Editing a beam (existing or new)
+    Beam(Option<Uuid>), // None = new beam, Some(id) = existing beam
+}
+
+/// A row in the load table (editable UI state)
+#[derive(Debug, Clone)]
+pub struct LoadTableRow {
+    pub id: Uuid,
+    pub load_type: LoadType,
+    pub distribution: DistributionType,
+    pub magnitude: String,
+    pub position: String,      // For point loads: position in ft
+    pub tributary_width: String, // Optional tributary width
+}
+
+impl LoadTableRow {
+    fn new() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            load_type: LoadType::Dead,
+            distribution: DistributionType::UniformFull,
+            magnitude: "0.0".to_string(),
+            position: "".to_string(),
+            tributary_width: "".to_string(),
+        }
+    }
+
+    /// Convert to DiscreteLoad
+    fn to_discrete_load(&self) -> Option<DiscreteLoad> {
+        let magnitude: f64 = self.magnitude.parse().ok()?;
+        let tributary: Option<f64> = if self.tributary_width.is_empty() {
+            None
+        } else {
+            Some(self.tributary_width.parse().ok()?)
+        };
+
+        let mut load = match self.distribution {
+            DistributionType::UniformFull => {
+                DiscreteLoad::uniform(self.load_type, magnitude)
+            }
+            DistributionType::Point => {
+                let pos: f64 = self.position.parse().ok()?;
+                DiscreteLoad::point(self.load_type, magnitude, pos)
+            }
+            DistributionType::UniformPartial => {
+                // For partial uniform, position field is "start-end" format
+                // For simplicity, treat as full span for now
+                DiscreteLoad::uniform(self.load_type, magnitude)
+            }
+        };
+
+        if let Some(tw) = tributary {
+            load = load.with_tributary_width(tw);
+        }
+
+        Some(load)
+    }
+
+    /// Create from DiscreteLoad
+    fn from_discrete_load(load: &DiscreteLoad) -> Self {
+        let (distribution, position) = match &load.distribution {
+            LoadDistribution::UniformFull => (DistributionType::UniformFull, String::new()),
+            LoadDistribution::Point { position_ft } => {
+                (DistributionType::Point, position_ft.to_string())
+            }
+            LoadDistribution::UniformPartial { start_ft, end_ft } => {
+                (DistributionType::UniformPartial, format!("{}-{}", start_ft, end_ft))
+            }
+            _ => (DistributionType::UniformFull, String::new()),
+        };
+
+        Self {
+            id: load.id,
+            load_type: load.load_type,
+            distribution,
+            magnitude: load.magnitude.to_string(),
+            position,
+            tributary_width: load.tributary_width_ft
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
         }
     }
 }
@@ -88,15 +225,21 @@ struct App {
     is_modified: bool,
     lock_holder: Option<String>, // Who holds the lock if we opened read-only
 
-    // Currently selected/editing beam
-    selected_beam_id: Option<Uuid>,
+    // Left panel state - collapsed sections
+    collapsed_sections: HashSet<ItemSection>,
+
+    // Current editor selection
+    selection: EditorSelection,
 
     // Beam input fields (for editing)
     beam_label: String,
     span_ft: String,
-    load_plf: String,
     width_in: String,
     depth_in: String,
+
+    // Load table for multiple discrete loads
+    load_table: Vec<LoadTableRow>,
+    include_self_weight: bool,
 
     // Material selection
     selected_material_type: MaterialType,
@@ -123,18 +266,40 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
+        // Create default load table with typical D+L loads
+        let default_loads = vec![
+            LoadTableRow {
+                id: Uuid::new_v4(),
+                load_type: LoadType::Dead,
+                distribution: DistributionType::UniformFull,
+                magnitude: "15.0".to_string(),
+                position: String::new(),
+                tributary_width: String::new(),
+            },
+            LoadTableRow {
+                id: Uuid::new_v4(),
+                load_type: LoadType::Live,
+                distribution: DistributionType::UniformFull,
+                magnitude: "40.0".to_string(),
+                position: String::new(),
+                tributary_width: String::new(),
+            },
+        ];
+
         App {
             project: Project::new("Engineer", "25-001", "Client"),
             current_file: None,
             file_lock: None,
             is_modified: false,
             lock_holder: None,
-            selected_beam_id: None,
+            collapsed_sections: HashSet::new(), // All sections expanded by default
+            selection: EditorSelection::ProjectInfo, // Start with project info selected
             beam_label: "B-1".to_string(),
             span_ft: "12.0".to_string(),
-            load_plf: "150.0".to_string(),
             width_in: "1.5".to_string(),
             depth_in: "9.25".to_string(),
+            load_table: default_loads,
+            include_self_weight: true,
             selected_material_type: MaterialType::SawnLumber,
             selected_species: Some(WoodSpecies::DouglasFirLarch),
             selected_grade: Some(WoodGrade::No2),
@@ -198,16 +363,29 @@ enum Message {
     JobIdChanged(String),
     ClientChanged(String),
 
-    // Beam selection
+    // Left panel section toggle
+    ToggleSection(ItemSection),
+
+    // Editor selection
+    SelectProjectInfo,
     SelectBeam(Uuid),
-    DeselectBeam,
+    NewBeam,
 
     // Beam input field changes
     BeamLabelChanged(String),
     SpanChanged(String),
-    LoadChanged(String),
     WidthChanged(String),
     DepthChanged(String),
+
+    // Load table operations
+    AddLoad,
+    RemoveLoad(Uuid),
+    LoadTypeChanged(Uuid, LoadType),
+    LoadDistributionChanged(Uuid, DistributionType),
+    LoadMagnitudeChanged(Uuid, String),
+    LoadPositionChanged(Uuid, String),
+    LoadTributaryChanged(Uuid, String),
+    IncludeSelfWeightToggled(bool),
 
     // Material selection
     MaterialTypeSelected(MaterialType),
@@ -311,12 +489,26 @@ impl App {
                 }
             }
 
-            // Beam selection
+            // Section toggle
+            Message::ToggleSection(section) => {
+                if self.collapsed_sections.contains(&section) {
+                    self.collapsed_sections.remove(&section);
+                } else {
+                    self.collapsed_sections.insert(section);
+                }
+            }
+
+            // Editor selection
+            Message::SelectProjectInfo => {
+                self.selection = EditorSelection::ProjectInfo;
+                self.result = None;
+                self.error_message = None;
+            }
             Message::SelectBeam(id) => {
                 self.select_beam(id);
             }
-            Message::DeselectBeam => {
-                self.deselect_beam();
+            Message::NewBeam => {
+                self.new_beam();
             }
 
             // Beam fields
@@ -326,15 +518,49 @@ impl App {
             Message::SpanChanged(value) => {
                 self.span_ft = value;
             }
-            Message::LoadChanged(value) => {
-                self.load_plf = value;
-            }
             Message::WidthChanged(value) => {
                 self.width_in = value;
             }
             Message::DepthChanged(value) => {
                 self.depth_in = value;
             }
+
+            // Load table operations
+            Message::AddLoad => {
+                self.load_table.push(LoadTableRow::new());
+            }
+            Message::RemoveLoad(id) => {
+                self.load_table.retain(|row| row.id != id);
+            }
+            Message::LoadTypeChanged(id, load_type) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.load_type = load_type;
+                }
+            }
+            Message::LoadDistributionChanged(id, dist) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.distribution = dist;
+                }
+            }
+            Message::LoadMagnitudeChanged(id, value) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.magnitude = value;
+                }
+            }
+            Message::LoadPositionChanged(id, value) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.position = value;
+                }
+            }
+            Message::LoadTributaryChanged(id, value) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.tributary_width = value;
+                }
+            }
+            Message::IncludeSelfWeightToggled(value) => {
+                self.include_self_weight = value;
+            }
+
             Message::MaterialTypeSelected(material_type) => {
                 self.selected_material_type = material_type;
             }
@@ -396,10 +622,9 @@ impl App {
         self.current_file = None;
         self.is_modified = false;
         self.lock_holder = None;
-        self.selected_beam_id = None;
+        self.selection = EditorSelection::ProjectInfo;
         self.result = None;
         self.error_message = None;
-        self.deselect_beam();
         self.status = "New project created".to_string();
     }
 
@@ -426,10 +651,9 @@ impl App {
                             self.file_lock = Some(lock); // Keep the lock!
                             self.is_modified = false;
                             self.lock_holder = None;
-                            self.selected_beam_id = None;
+                            self.selection = EditorSelection::ProjectInfo;
                             self.result = None;
                             self.error_message = None;
-                            self.deselect_beam();
                             self.status = format!("Opened: {}", path.display());
                         }
                         Err(e) => {
@@ -446,10 +670,9 @@ impl App {
                             self.file_lock = None; // No lock in read-only mode
                             self.is_modified = false;
                             self.lock_holder = Some(locked_by.clone());
-                            self.selected_beam_id = None;
+                            self.selection = EditorSelection::ProjectInfo;
                             self.result = None;
                             self.error_message = None;
-                            self.deselect_beam();
                             self.status = format!("Opened read-only (locked by {})", locked_by);
                         }
                         Err(e) => {
@@ -543,12 +766,20 @@ impl App {
     fn select_beam(&mut self, id: Uuid) {
         if let Some(item) = self.project.items.get(&id) {
             if let CalculationItem::Beam(beam) = item {
-                self.selected_beam_id = Some(id);
+                self.selection = EditorSelection::Beam(Some(id));
                 self.beam_label = beam.label.clone();
                 self.span_ft = beam.span_ft.to_string();
-                self.load_plf = beam.uniform_load_plf.to_string();
                 self.width_in = beam.width_in.to_string();
                 self.depth_in = beam.depth_in.to_string();
+
+                // Populate load table from beam's load_case
+                self.load_table = beam
+                    .load_case
+                    .loads
+                    .iter()
+                    .map(LoadTableRow::from_discrete_load)
+                    .collect();
+                self.include_self_weight = beam.load_case.include_self_weight;
 
                 // Extract material-specific fields
                 match &beam.material {
@@ -579,13 +810,34 @@ impl App {
         }
     }
 
-    fn deselect_beam(&mut self) {
-        self.selected_beam_id = None;
+    fn new_beam(&mut self) {
+        self.selection = EditorSelection::Beam(None);
         self.beam_label = "B-1".to_string();
         self.span_ft = "12.0".to_string();
-        self.load_plf = "150.0".to_string();
         self.width_in = "1.5".to_string();
         self.depth_in = "9.25".to_string();
+
+        // Reset to default load table
+        self.load_table = vec![
+            LoadTableRow {
+                id: Uuid::new_v4(),
+                load_type: LoadType::Dead,
+                distribution: DistributionType::UniformFull,
+                magnitude: "15.0".to_string(),
+                position: String::new(),
+                tributary_width: String::new(),
+            },
+            LoadTableRow {
+                id: Uuid::new_v4(),
+                load_type: LoadType::Live,
+                distribution: DistributionType::UniformFull,
+                magnitude: "40.0".to_string(),
+                position: String::new(),
+                tributary_width: String::new(),
+            },
+        ];
+        self.include_self_weight = true;
+
         self.selected_material_type = MaterialType::SawnLumber;
         self.selected_species = Some(WoodSpecies::DouglasFirLarch);
         self.selected_grade = Some(WoodGrade::No2);
@@ -593,6 +845,16 @@ impl App {
         self.selected_glulam_layup = Some(GlulamLayup::Unbalanced);
         self.selected_lvl_grade = Some(LvlGrade::Standard);
         self.selected_psl_grade = Some(PslGrade::Standard);
+        self.result = None;
+        self.error_message = None;
+    }
+
+    /// Helper to get selected beam ID if any
+    fn selected_beam_id(&self) -> Option<Uuid> {
+        match self.selection {
+            EditorSelection::Beam(Some(id)) => Some(id),
+            _ => None,
+        }
     }
 
     fn add_or_update_beam(&mut self) {
@@ -609,13 +871,6 @@ impl App {
                 return;
             }
         };
-        let load_plf = match self.load_plf.parse::<f64>() {
-            Ok(v) => v,
-            _ => {
-                self.error_message = Some("Invalid load value".to_string());
-                return;
-            }
-        };
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => {
@@ -689,16 +944,31 @@ impl App {
             }
         };
 
+        // Build load case from load table
+        let mut load_case = EnhancedLoadCase::new("Service Loads");
+        load_case.include_self_weight = self.include_self_weight;
+
+        for row in &self.load_table {
+            if let Some(load) = row.to_discrete_load() {
+                load_case = load_case.with_load(load);
+            }
+        }
+
+        if load_case.loads.is_empty() {
+            self.error_message = Some("At least one valid load is required".to_string());
+            return;
+        }
+
         let beam = BeamInput {
             label: self.beam_label.clone(),
             span_ft,
-            uniform_load_plf: load_plf,
+            load_case,
             material,
             width_in,
             depth_in,
         };
 
-        if let Some(id) = self.selected_beam_id {
+        if let Some(id) = self.selected_beam_id() {
             // Update existing beam
             self.project.items.insert(id, CalculationItem::Beam(beam));
             self.mark_modified();
@@ -707,7 +977,7 @@ impl App {
         } else {
             // Add new beam
             let id = self.project.add_item(CalculationItem::Beam(beam));
-            self.selected_beam_id = Some(id);
+            self.selection = EditorSelection::Beam(Some(id));
             self.mark_modified();
             self.error_message = None;
             self.status = format!("Added beam '{}'", self.beam_label);
@@ -720,11 +990,11 @@ impl App {
             return;
         }
 
-        if let Some(id) = self.selected_beam_id {
+        if let Some(id) = self.selected_beam_id() {
             if let Some(item) = self.project.items.remove(&id) {
                 self.mark_modified();
                 self.status = format!("Deleted: {}", item.label());
-                self.deselect_beam();
+                self.new_beam(); // Reset to new beam state
             }
         } else {
             self.status = "No beam selected to delete".to_string();
@@ -736,32 +1006,24 @@ impl App {
 
         // Parse inputs
         let span_ft = match self.span_ft.parse::<f64>() {
-            Ok(v) => v,
-            Err(_) => {
+            Ok(v) if v > 0.0 => v,
+            _ => {
                 self.error_message = Some("Invalid span value".to_string());
                 return;
             }
         };
 
-        let load_plf = match self.load_plf.parse::<f64>() {
-            Ok(v) => v,
-            Err(_) => {
-                self.error_message = Some("Invalid load value".to_string());
-                return;
-            }
-        };
-
         let width_in = match self.width_in.parse::<f64>() {
-            Ok(v) => v,
-            Err(_) => {
+            Ok(v) if v > 0.0 => v,
+            _ => {
                 self.error_message = Some("Invalid width value".to_string());
                 return;
             }
         };
 
         let depth_in = match self.depth_in.parse::<f64>() {
-            Ok(v) => v,
-            Err(_) => {
+            Ok(v) if v > 0.0 => v,
+            _ => {
                 self.error_message = Some("Invalid depth value".to_string());
                 return;
             }
@@ -825,18 +1087,34 @@ impl App {
             }
         };
 
+        // Build load case from load table
+        let mut load_case = EnhancedLoadCase::new("Service Loads");
+        load_case.include_self_weight = self.include_self_weight;
+
+        for row in &self.load_table {
+            if let Some(load) = row.to_discrete_load() {
+                load_case = load_case.with_load(load);
+            }
+        }
+
+        if load_case.loads.is_empty() {
+            self.error_message = Some("At least one valid load is required".to_string());
+            return;
+        }
+
         // Build input
         let input = BeamInput {
             label: self.beam_label.clone(),
             span_ft,
-            uniform_load_plf: load_plf,
+            load_case,
             material,
             width_in,
             depth_in,
         };
 
-        // Run calculation
-        match calculate(&input) {
+        // Run calculation using project's design method
+        let design_method = self.project.settings.design_method;
+        match calculate(&input, design_method) {
             Ok(result) => {
                 let status = if result.passes() {
                     "Calculation complete - PASS"
@@ -980,67 +1258,220 @@ impl App {
     }
 
     fn view_items_panel(&self) -> Element<'_, Message> {
-        let mut items_list = column![text("Project Items").size(16), vertical_space().height(10),]
-            .spacing(4);
+        let mut panel_content: Column<'_, Message> = column![].spacing(2);
 
-        if self.project.items.is_empty() {
-            items_list = items_list.push(text("No items yet").size(11));
-        } else {
-            for (id, item) in &self.project.items {
-                let is_selected = self.selected_beam_id == Some(*id);
-                let label = format!("{}: {}", item.calc_type(), item.label());
+        // ===== Project Info Section =====
+        let project_expanded = !self.collapsed_sections.contains(&ItemSection::ProjectInfo);
+        let project_selected = matches!(self.selection, EditorSelection::ProjectInfo);
+        let project_header = self.view_section_header("Project Info", ItemSection::ProjectInfo, project_expanded, None);
+        panel_content = panel_content.push(project_header);
 
-                let btn = if is_selected {
-                    button(text(label).size(11))
-                        .on_press(Message::DeselectBeam)
-                        .padding(Padding::from([4, 8]))
-                        .style(button::primary)
-                        .width(Length::Fill)
-                } else {
-                    button(text(label).size(11))
-                        .on_press(Message::SelectBeam(*id))
-                        .padding(Padding::from([4, 8]))
-                        .style(button::secondary)
-                        .width(Length::Fill)
-                };
+        if project_expanded {
+            let project_info_content = column![
+                text(format!("Eng: {}", self.project.meta.engineer)).size(10),
+                text(format!("Job: {}", self.project.meta.job_id)).size(10),
+                text(format!("Client: {}", self.project.meta.client)).size(10),
+            ]
+            .spacing(2);
 
-                items_list = items_list.push(btn);
-            }
+            // Make clickable to select project info for editing
+            let project_btn_style = if project_selected {
+                button::primary
+            } else {
+                button::secondary
+            };
+            let project_info_btn = button(project_info_content)
+                .on_press(Message::SelectProjectInfo)
+                .padding(Padding::from([4, 16]))
+                .style(project_btn_style)
+                .width(Length::Fill);
+
+            panel_content = panel_content.push(project_info_btn);
         }
 
-        // New item button
-        items_list = items_list.push(vertical_space().height(10));
-        items_list = items_list.push(
-            button(text("+ New Beam").size(11))
-                .on_press(Message::DeselectBeam)
-                .padding(Padding::from([4, 8]))
-                .width(Length::Fill),
-        );
+        panel_content = panel_content.push(horizontal_rule(1));
 
-        let panel = container(scrollable(items_list.padding(8)))
-            .width(Length::Fixed(160.0))
+        // ===== Wood Beams Section =====
+        let beams_expanded = !self.collapsed_sections.contains(&ItemSection::WoodBeams);
+        let beam_count = self.project.items.values()
+            .filter(|i| matches!(i, CalculationItem::Beam(_)))
+            .count();
+
+        // Section header with expand/collapse and add button
+        let beams_indicator = if beams_expanded { "▼" } else { "▶" };
+        let beams_header_btn = button(
+            row![
+                text(beams_indicator).size(10),
+                horizontal_space().width(4),
+                text(format!("Wood Beams ({})", beam_count)).size(11),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::ToggleSection(ItemSection::WoodBeams))
+        .padding(Padding::from([4, 6]))
+        .style(button::text)
+        .width(Length::Fill);
+
+        let beams_header = row![
+            beams_header_btn,
+            button(text("+").size(11))
+                .on_press(Message::NewBeam)
+                .padding(Padding::from([2, 6]))
+                .style(button::secondary),
+        ]
+        .spacing(2);
+        panel_content = panel_content.push(beams_header);
+
+        if beams_expanded {
+            let mut beams_list: Column<'_, Message> = column![].spacing(2).padding(Padding::from([4, 8]));
+
+            // List beams
+            for (id, item) in &self.project.items {
+                if let CalculationItem::Beam(beam) = item {
+                    let is_selected = self.selected_beam_id() == Some(*id);
+                    let btn = if is_selected {
+                        button(text(&beam.label).size(10))
+                            .on_press(Message::SelectBeam(*id)) // Re-select (no-op)
+                            .padding(Padding::from([3, 6]))
+                            .style(button::primary)
+                            .width(Length::Fill)
+                    } else {
+                        button(text(&beam.label).size(10))
+                            .on_press(Message::SelectBeam(*id))
+                            .padding(Padding::from([3, 6]))
+                            .style(button::secondary)
+                            .width(Length::Fill)
+                    };
+                    beams_list = beams_list.push(btn);
+                }
+            }
+
+            if beam_count == 0 {
+                beams_list = beams_list.push(text("(none)").size(10).color([0.5, 0.5, 0.5]));
+            }
+
+            panel_content = panel_content.push(beams_list);
+        }
+
+        panel_content = panel_content.push(horizontal_rule(1));
+
+        // ===== Wood Columns Section (Future) =====
+        let columns_header = self.view_section_header_disabled("Wood Columns", 0);
+        panel_content = panel_content.push(columns_header);
+
+        panel_content = panel_content.push(horizontal_rule(1));
+
+        // ===== Future Sections (Grayed out) =====
+        let future_sections = column![
+            text("Cont. Footings").size(10).color([0.6, 0.6, 0.6]),
+            text("Spread Footings").size(10).color([0.6, 0.6, 0.6]),
+            text("Cantilever Walls").size(10).color([0.6, 0.6, 0.6]),
+            text("Restrained Walls").size(10).color([0.6, 0.6, 0.6]),
+        ]
+        .spacing(4)
+        .padding(Padding::from([6, 8]));
+        panel_content = panel_content.push(future_sections);
+
+        let panel = container(scrollable(panel_content.padding(4)))
+            .width(Length::Fixed(170.0))
             .height(Length::Fill)
             .style(container::bordered_box)
-            .padding(5);
+            .padding(4);
 
         panel.into()
     }
 
-    fn view_input_panel(&self) -> Element<'_, Message> {
-        let project_section = column![
-            text("Project Information").size(14),
-            vertical_space().height(8),
-            labeled_input(
-                "Engineer:",
-                &self.project.meta.engineer,
-                Message::EngineerNameChanged
-            ),
-            labeled_input("Job ID:", &self.project.meta.job_id, Message::JobIdChanged),
-            labeled_input("Client:", &self.project.meta.client, Message::ClientChanged),
-        ]
-        .spacing(6);
+    /// Create a collapsible section header with expand/collapse indicator
+    fn view_section_header<'a>(
+        &'a self,
+        title: &'a str,
+        section: ItemSection,
+        expanded: bool,
+        add_action: Option<Message>,
+    ) -> Element<'a, Message> {
+        let indicator = if expanded { "▼" } else { "▶" };
 
-        let editing_label = if self.selected_beam_id.is_some() {
+        let header_btn = button(
+            row![
+                text(indicator).size(10),
+                horizontal_space().width(4),
+                text(title).size(11),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::ToggleSection(section))
+        .padding(Padding::from([4, 6]))
+        .style(button::text)
+        .width(Length::Fill);
+
+        if let Some(action) = add_action {
+            row![
+                header_btn,
+                button(text("+").size(11))
+                    .on_press(action)
+                    .padding(Padding::from([2, 6]))
+                    .style(button::secondary),
+            ]
+            .spacing(2)
+            .into()
+        } else {
+            header_btn.into()
+        }
+    }
+
+    /// Create a disabled section header for future features
+    fn view_section_header_disabled(&self, title: &str, count: usize) -> Element<'_, Message> {
+        row![
+            text("▶").size(10).color([0.6, 0.6, 0.6]),
+            horizontal_space().width(4),
+            text(format!("{} ({})", title, count)).size(11).color([0.6, 0.6, 0.6]),
+        ]
+        .padding(Padding::from([4, 6]))
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    fn view_input_panel(&self) -> Element<'_, Message> {
+        // Show different content based on current selection
+        let panel: Column<'_, Message> = match self.selection {
+            EditorSelection::ProjectInfo => {
+                // Project Info editor
+                column![
+                    text("Project Information").size(14),
+                    vertical_space().height(8),
+                    labeled_input(
+                        "Engineer:",
+                        &self.project.meta.engineer,
+                        Message::EngineerNameChanged
+                    ),
+                    labeled_input("Job ID:", &self.project.meta.job_id, Message::JobIdChanged),
+                    labeled_input("Client:", &self.project.meta.client, Message::ClientChanged),
+                    vertical_space().height(20),
+                    text("Select a beam from the left panel to edit,").size(11).color([0.5, 0.5, 0.5]),
+                    text("or click '+' to create a new beam.").size(11).color([0.5, 0.5, 0.5]),
+                ]
+                .spacing(6)
+            }
+            EditorSelection::None => {
+                // Nothing selected
+                column![
+                    text("Select an item from the left panel").size(14).color([0.5, 0.5, 0.5]),
+                ]
+            }
+            EditorSelection::Beam(_) => {
+                // Beam editor
+                self.view_beam_editor()
+            }
+        };
+
+        container(scrollable(panel.width(Length::FillPortion(2)).padding(8)))
+            .style(container::bordered_box)
+            .padding(5)
+            .into()
+    }
+
+    fn view_beam_editor(&self) -> Column<'_, Message> {
+        let editing_label = if self.selected_beam_id().is_some() {
             "Edit Beam"
         } else {
             "New Beam"
@@ -1051,11 +1482,13 @@ impl App {
             vertical_space().height(8),
             labeled_input("Label:", &self.beam_label, Message::BeamLabelChanged),
             labeled_input("Span (ft):", &self.span_ft, Message::SpanChanged),
-            labeled_input("Load (plf):", &self.load_plf, Message::LoadChanged),
             labeled_input("Width (in):", &self.width_in, Message::WidthChanged),
             labeled_input("Depth (in):", &self.depth_in, Message::DepthChanged),
         ]
         .spacing(6);
+
+        // Load table section
+        let loads_section = self.view_load_table();
 
         // Build material-specific options based on selected type
         let material_options: Column<'_, Message> = match self.selected_material_type {
@@ -1138,7 +1571,7 @@ impl App {
         ]
         .spacing(2);
 
-        let save_btn_text = if self.selected_beam_id.is_some() {
+        let save_btn_text = if self.selected_beam_id().is_some() {
             "Update Beam"
         } else {
             "Add Beam"
@@ -1154,7 +1587,7 @@ impl App {
         ]
         .spacing(6);
 
-        if self.selected_beam_id.is_some() {
+        if self.selected_beam_id().is_some() {
             action_buttons = action_buttons.push(
                 button("Delete")
                     .on_press(Message::DeleteSelectedBeam)
@@ -1168,22 +1601,110 @@ impl App {
                 .padding(Padding::from([6, 12])),
         );
 
-        let panel = column![
-            project_section,
-            vertical_space().height(15),
+        column![
             beam_section,
-            vertical_space().height(15),
+            vertical_space().height(10),
+            loads_section,
+            vertical_space().height(10),
             material_section,
             vertical_space().height(15),
             action_buttons,
         ]
-        .width(Length::FillPortion(2))
-        .padding(8);
+    }
 
-        container(scrollable(panel))
-            .style(container::bordered_box)
-            .padding(5)
-            .into()
+    fn view_load_table(&self) -> Element<'_, Message> {
+        let self_weight_checkbox = checkbox("Include self-weight", self.include_self_weight)
+            .on_toggle(Message::IncludeSelfWeightToggled)
+            .text_size(11);
+
+        // Header row
+        let header = row![
+            text("Type").size(10).width(Length::Fixed(45.0)),
+            text("Dist").size(10).width(Length::Fixed(60.0)),
+            text("Mag").size(10).width(Length::Fixed(55.0)),
+            text("Pos").size(10).width(Length::Fixed(45.0)),
+            text("Trib").size(10).width(Length::Fixed(45.0)),
+            text("").size(10).width(Length::Fixed(30.0)), // Delete button column
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        // Build rows for each load
+        let mut load_rows: Column<'_, Message> = column![].spacing(4);
+
+        for load_row in &self.load_table {
+            let row_id = load_row.id;
+
+            let type_picker = pick_list(
+                &LoadType::ALL[..],
+                Some(load_row.load_type),
+                move |lt| Message::LoadTypeChanged(row_id, lt),
+            )
+            .width(Length::Fixed(45.0))
+            .text_size(10);
+
+            let dist_picker = pick_list(
+                &DistributionType::ALL[..],
+                Some(load_row.distribution),
+                move |dt| Message::LoadDistributionChanged(row_id, dt),
+            )
+            .width(Length::Fixed(60.0))
+            .text_size(10);
+
+            let mag_input = text_input("0.0", &load_row.magnitude)
+                .on_input(move |s| Message::LoadMagnitudeChanged(row_id, s))
+                .width(Length::Fixed(55.0))
+                .padding(2)
+                .size(10);
+
+            // Position input (only relevant for point loads)
+            let pos_input = text_input("", &load_row.position)
+                .on_input(move |s| Message::LoadPositionChanged(row_id, s))
+                .width(Length::Fixed(45.0))
+                .padding(2)
+                .size(10);
+
+            let trib_input = text_input("", &load_row.tributary_width)
+                .on_input(move |s| Message::LoadTributaryChanged(row_id, s))
+                .width(Length::Fixed(45.0))
+                .padding(2)
+                .size(10);
+
+            let delete_btn = button(text("X").size(10))
+                .on_press(Message::RemoveLoad(row_id))
+                .padding(Padding::from([2, 6]));
+
+            let load_row_widget: Row<'_, Message> = row![
+                type_picker,
+                dist_picker,
+                mag_input,
+                pos_input,
+                trib_input,
+                delete_btn,
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center);
+
+            load_rows = load_rows.push(load_row_widget);
+        }
+
+        let add_load_btn = button(text("+ Add Load").size(10))
+            .on_press(Message::AddLoad)
+            .padding(Padding::from([4, 8]));
+
+        column![
+            text("Loads").size(14),
+            vertical_space().height(6),
+            self_weight_checkbox,
+            vertical_space().height(6),
+            header,
+            horizontal_rule(1),
+            load_rows,
+            vertical_space().height(6),
+            add_load_btn,
+        ]
+        .spacing(2)
+        .into()
     }
 
     fn view_results_panel(&self) -> Element<'_, Message> {
@@ -1266,11 +1787,22 @@ impl App {
             "FAIL"
         };
 
+        // Build load info section
+        let self_weight_text = if result.self_weight_plf > 0.0 {
+            format!(" (incl. self-wt: {:.1} plf)", result.self_weight_plf)
+        } else {
+            String::new()
+        };
+
         column![
             text("Calculation Results").size(14),
             vertical_space().height(8),
             pass_fail,
             governing,
+            vertical_space().height(12),
+            text("Load Summary").size(12),
+            text(format!("Design Load: {:.1} plf{}", result.design_load_plf, self_weight_text)).size(11),
+            text(format!("Governing Combo: {}", result.governing_combination)).size(11),
             vertical_space().height(12),
             text("Demand").size(12),
             text(format!("Max Moment: {:.0} ft-lb", result.max_moment_ftlb)).size(11),
@@ -1377,7 +1909,7 @@ impl BeamDiagramData {
     fn from_calc(input: &BeamInput, result: &BeamResult) -> Self {
         Self {
             span_ft: input.span_ft,
-            load_plf: input.uniform_load_plf,
+            load_plf: result.design_load_plf, // Use the factored design load from result
             max_shear_lb: result.max_shear_lb,
             max_moment_ftlb: result.max_moment_ftlb,
             max_deflection_in: result.max_deflection_in,

@@ -14,17 +14,22 @@
 //! use calc_core::pdf::render_beam_pdf;
 //! use calc_core::calculations::beam::{BeamInput, calculate};
 //! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
+//! use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+//!
+//! let load_case = EnhancedLoadCase::new("Floor")
+//!     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
+//!     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 //!
 //! let input = BeamInput {
 //!     label: "B-1".to_string(),
 //!     span_ft: 12.0,
-//!     uniform_load_plf: 150.0,
+//!     load_case,
 //!     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 //!     width_in: 1.5,
 //!     depth_in: 9.25,
 //! };
 //!
-//! let result = calculate(&input).unwrap();
+//! let result = calculate(&input, DesignMethod::Asd).unwrap();
 //! let pdf_bytes = render_beam_pdf(&input, &result, "John Engineer", "25-001").unwrap();
 //! std::fs::write("beam_report.pdf", pdf_bytes).unwrap();
 //! ```
@@ -343,17 +348,22 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 /// use calc_core::pdf::render_beam_pdf;
 /// use calc_core::calculations::beam::{BeamInput, calculate};
 /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
+/// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+///
+/// let load_case = EnhancedLoadCase::new("Floor")
+///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
+///     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 ///
 /// let input = BeamInput {
 ///     label: "B-1".to_string(),
 ///     span_ft: 12.0,
-///     uniform_load_plf: 150.0,
+///     load_case,
 ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 ///     width_in: 1.5,
 ///     depth_in: 9.25,
 /// };
 ///
-/// let result = calculate(&input).unwrap();
+/// let result = calculate(&input, DesignMethod::Asd).unwrap();
 /// let pdf = render_beam_pdf(&input, &result, "John Engineer", "25-001").unwrap();
 /// ```
 pub fn render_beam_pdf(
@@ -369,7 +379,7 @@ pub fn render_beam_pdf(
         .replace("{{JOB_ID}}", job_id)
         .replace("{{DATE}}", &Utc::now().format("%Y-%m-%d").to_string())
         .replace("{{SPAN_FT}}", &format!("{:.1}", input.span_ft))
-        .replace("{{LOAD_PLF}}", &format!("{:.0}", input.uniform_load_plf))
+        .replace("{{LOAD_PLF}}", &format!("{:.0}", result.design_load_plf))
         .replace("{{WIDTH_IN}}", &format!("{:.2}", input.width_in))
         .replace("{{DEPTH_IN}}", &format!("{:.2}", input.depth_in))
         .replace(
@@ -460,10 +470,11 @@ pub fn render_beam_pdf(
 pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
     // Collect all beams and calculate their results
     let mut beams: Vec<(&BeamInput, BeamResult)> = Vec::new();
+    let design_method = project.settings.design_method;
 
     for item in project.items.values() {
         if let CalculationItem::Beam(beam) = item {
-            match calculate(beam) {
+            match calculate(beam, design_method) {
                 Ok(result) => beams.push((beam, result)),
                 Err(e) => {
                     return Err(CalcError::Internal {
@@ -675,7 +686,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {deflection_in} "in" $
             beams.len(),
             beam_label = escape_typst(&input.label),
             span_ft = format!("{:.1}", input.span_ft),
-            load_plf = format!("{:.0}", input.uniform_load_plf),
+            load_plf = format!("{:.0}", result.design_load_plf),
             width_in = format!("{:.2}", input.width_in),
             depth_in = format!("{:.2}", input.depth_in),
             material = input.material.display_name(),
@@ -780,14 +791,19 @@ fn build_summary_rows(beams: &[(&BeamInput, BeamResult)]) -> String {
 mod tests {
     use super::*;
     use crate::calculations::beam::calculate;
+    use crate::loads::{DesignMethod, EnhancedLoadCase, DiscreteLoad, LoadType};
     use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
     #[test]
     fn test_pdf_generation() {
+        let load_case = EnhancedLoadCase::new("Test Loads")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 30.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Live, 70.0));
+
         let input = BeamInput {
             label: "B-1 Test Beam".to_string(),
             span_ft: 12.0,
-            uniform_load_plf: 100.0,
+            load_case,
             material: Material::SawnLumber(WoodMaterial::new(
                 WoodSpecies::DouglasFirLarch,
                 WoodGrade::No2,
@@ -796,7 +812,7 @@ mod tests {
             depth_in: 9.25,
         };
 
-        let result = calculate(&input).unwrap();
+        let result = calculate(&input, DesignMethod::Asd).unwrap();
         let pdf = render_beam_pdf(&input, &result, "Test Engineer", "TEST-001");
 
         // Should succeed
