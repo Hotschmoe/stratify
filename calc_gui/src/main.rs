@@ -9,16 +9,25 @@ use iced::widget::{
     button, column, container, horizontal_rule, horizontal_space, pick_list, row, scrollable,
     text, text_input, vertical_space, Column,
 };
-use iced::{Alignment, Element, Length, Padding, Task, Theme};
+use iced::{Alignment, Element, Font, Length, Padding, Task, Theme};
 
 use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
 use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
 use calc_core::pdf::render_beam_pdf;
 
+// Embed BerkeleyMono font at compile time
+const BERKELEY_MONO: &[u8] =
+    include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Regular.otf");
+const BERKELEY_MONO_BOLD: &[u8] =
+    include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold.otf");
+
 fn main() -> iced::Result {
     iced::application("Stratify - Structural Engineering", App::update, App::view)
         .theme(|_| Theme::Light)
         .window_size((900.0, 700.0))
+        .font(BERKELEY_MONO)
+        .font(BERKELEY_MONO_BOLD)
+        .default_font(Font::with_name("Berkeley Mono"))
         .run_with(App::new)
 }
 

@@ -73,7 +73,30 @@ impl PdfWorld {
     fn load_fonts() -> Vec<Font> {
         let mut fonts = Vec::new();
 
-        // Load bundled fonts from typst-assets
+        // Load BerkeleyMono fonts (embedded at compile time)
+        const BERKELEY_MONO_REGULAR: &[u8] =
+            include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Regular.otf");
+        const BERKELEY_MONO_BOLD: &[u8] =
+            include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold.otf");
+        const BERKELEY_MONO_OBLIQUE: &[u8] =
+            include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Oblique.otf");
+        const BERKELEY_MONO_BOLD_OBLIQUE: &[u8] =
+            include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold-Oblique.otf");
+
+        // Load our custom fonts first (higher priority)
+        for font_bytes in [
+            BERKELEY_MONO_REGULAR,
+            BERKELEY_MONO_BOLD,
+            BERKELEY_MONO_OBLIQUE,
+            BERKELEY_MONO_BOLD_OBLIQUE,
+        ] {
+            let buffer = Bytes::new(font_bytes.to_vec());
+            for font in Font::iter(buffer) {
+                fonts.push(font);
+            }
+        }
+
+        // Load bundled fonts from typst-assets (fallback for math symbols, etc.)
         for font_bytes in typst_assets::fonts() {
             let buffer = Bytes::new(font_bytes.to_vec());
             for font in Font::iter(buffer) {
@@ -148,7 +171,7 @@ const BEAM_TEMPLATE: &str = r##"
   ]
 )
 
-#set text(font: "New Computer Modern", size: 11pt)
+#set text(font: "Berkeley Mono", size: 11pt)
 
 // Title Block
 #align(center)[
