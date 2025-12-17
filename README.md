@@ -36,9 +36,41 @@ stratify/
 
 ### Component Breakdown
 
-- **calc_core**: The source of truth. Contains all engineering logic, data structures, serialization, and PDF generation. No UI dependencies.
+- **calc_core**: The source of truth. Contains all engineering logic, data structures, serialization, and PDF generation. No UI dependencies. Designed as an LLM-friendly API (see below).
 - **calc_gui**: Full-featured GUI application using Iced framework. Compiles to native executables and WebAssembly.
 - **calc_cli**: Terminal-based interface using Ratatui. Useful for quick calculations and batch processing.
+
+### LLM API Design (calc_core)
+
+The `calc_core` library is designed to be consumed by AI systems (Claude, GPT, Gemini, etc.) via MCP servers, function calling, or similar interfaces. Design principles:
+
+1. **Self-Documenting API**: All public types and functions include comprehensive rustdoc comments with examples. Generated documentation serves as the LLM's reference.
+
+2. **JSON-First Interface**: All inputs and outputs serialize cleanly to JSON. An LLM can construct a `BeamCalc` as JSON, pass it to the calculation engine, and receive structured results.
+
+3. **Stateless Calculations**: Pure functions where possible. `calculate_beam(BeamInput) -> BeamResult` with no hidden state.
+
+4. **Rich Error Types**: Errors return structured data explaining what went wrong, not just strings. LLMs can programmatically handle failures.
+
+5. **Schema Export**: The library can export JSON Schema definitions for all input/output types, enabling LLMs to validate their requests before submission.
+
+6. **Example-Heavy Documentation**: Every calculation type includes worked examples in the docs that LLMs can use as templates.
+
+```rust
+// Example: LLM-friendly beam calculation
+let input = serde_json::from_str::<BeamInput>(r#"{
+    "span_ft": 12.0,
+    "uniform_load_plf": 150.0,
+    "material": "DF-L No.2",
+    "width_in": 1.5,
+    "depth_in": 9.25
+}"#)?;
+
+let result = calc_core::beam::calculate(&input)?;
+// Returns structured JSON with moment, shear, deflection, unity checks, pass/fail
+```
+
+This architecture enables future integration as an MCP server, giving AI assistants direct structural engineering calculation capabilities.
 
 ## Tech Stack
 

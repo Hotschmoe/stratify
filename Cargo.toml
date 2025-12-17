@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "calc_core",
+    "calc_gui",
+    "calc_cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Stratify Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hotschmoe/Stratify"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+
+# File locking (for network drive safety)
+fs2 = "0.4"
+
+# Asset embedding
+rust-embed = "8.0"
+
+# PDF generation via Typst
+typst = "0.12"
+
+# GUI (Iced)
+iced = { version = "0.13", features = ["wgpu", "tokio"] }
+
+# TUI (Ratatui)
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Internal crates
+calc_core = { path = "calc_core" }

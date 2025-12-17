@@ -1,0 +1,25 @@
+[package]
+name = "calc_gui"
+description = "Stratify GUI application - Iced/wgpu based"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "calc_gui"
+path = "src/main.rs"
+
+[dependencies]
+calc_core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# GUI dependencies will be added when we implement the GUI
+# iced = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native-only dependencies
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WASM-only dependencies

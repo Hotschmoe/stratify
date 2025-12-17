@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(rustup show:*)",
+      "Bash(where:*)",
+      "Bash(rustup target add:*)",
+      "Bash(rustup default:*)",
+      "Bash(cargo clean:*)",
+      "Bash(dir 'C:\\Program Files\\Microsoft Visual Studio' /s /b)",
+      "Bash(findstr:*)"
+    ]
+  }
+}
