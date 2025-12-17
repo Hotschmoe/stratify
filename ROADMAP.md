@@ -285,6 +285,17 @@ The core input → calculation → PDF pipeline is functional with a GUI:
 - [ ] Undo/redo
 - [ ] Input validation and error messages
 
+- [ ] **Rendering Performance & Smoothness**
+  - [ ] Test resize behavior on all platforms (Windows, macOS, Linux, WASM)
+  - [ ] Evaluate present mode options (AutoVsync vs Mailbox) per platform
+  - [ ] Test backend selection (DX12/Vulkan on Windows, Metal on macOS)
+  - [ ] Profile frame times during resize and scrolling
+  - [ ] Consider alternative GUI frameworks if Iced performance is inadequate:
+    - **GPUI** (Zed's framework) - GPU-accelerated, Rust-native, very fast
+    - **egui** - Immediate mode, simpler but less feature-rich
+    - **Tauri + web frontend** - If native performance proves too difficult
+  - [ ] Document platform-specific optimizations needed
+
 ### Month 9: Documentation & Testing 🔲 NOT STARTED
 
 - [ ] User guide

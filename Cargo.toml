@@ -47,3 +47,8 @@ crossterm = "0.28"
 
 # Internal crates
 calc_core = { path = "calc_core" }
+
+# Optimize dependencies in dev builds for better UI performance
+# (keeps your code unoptimized for fast compile times)
+[profile.dev.package."*"]
+opt-level = 3
