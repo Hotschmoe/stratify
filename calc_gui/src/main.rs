@@ -3,17 +3,21 @@
 //! Full-featured graphical interface for structural engineering calculations.
 //! Built with Iced framework for cross-platform support (Windows, macOS, Linux, WASM).
 
-use std::fs;
+use std::path::PathBuf;
 
 use iced::widget::{
     button, column, container, horizontal_rule, horizontal_space, pick_list, row, scrollable,
     text, text_input, vertical_space, Column,
 };
 use iced::{Alignment, Element, Font, Length, Padding, Task, Theme};
+use uuid::Uuid;
 
 use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
+use calc_core::calculations::CalculationItem;
+use calc_core::file_io::{load_project, save_project, FileLock};
 use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
 use calc_core::pdf::render_beam_pdf;
+use calc_core::project::Project;
 
 // Embed BerkeleyMono font at compile time
 const BERKELEY_MONO: &[u8] =
@@ -35,20 +39,24 @@ fn main() -> iced::Result {
 // Application State
 // ============================================================================
 
-#[derive(Debug, Clone)]
 struct App {
-    // Project info
-    engineer_name: String,
-    job_id: String,
+    // Project data
+    project: Project,
 
-    // Beam input fields
+    // File management
+    current_file: Option<PathBuf>,
+    is_modified: bool,
+    lock_holder: Option<String>, // Who holds the lock if we opened read-only
+
+    // Currently selected/editing beam
+    current_beam_id: Option<Uuid>,
+
+    // Beam input fields (for editing)
     beam_label: String,
     span_ft: String,
     load_plf: String,
     width_in: String,
     depth_in: String,
-
-    // Material selection
     selected_species: Option<WoodSpecies>,
     selected_grade: Option<WoodGrade>,
 
@@ -63,8 +71,11 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         App {
-            engineer_name: "Engineer".to_string(),
-            job_id: "25-001".to_string(),
+            project: Project::new("Engineer", "25-001", "Client"),
+            current_file: None,
+            is_modified: false,
+            lock_holder: None,
+            current_beam_id: None,
             beam_label: "B-1".to_string(),
             span_ft: "12.0".to_string(),
             load_plf: "150.0".to_string(),
@@ -74,7 +85,7 @@ impl Default for App {
             selected_grade: Some(WoodGrade::No2),
             result: None,
             error_message: None,
-            status: "Ready".to_string(),
+            status: "Ready - New Project".to_string(),
         }
     }
 }
@@ -82,6 +93,20 @@ impl Default for App {
 impl App {
     fn new() -> (Self, Task<Message>) {
         (Self::default(), Task::none())
+    }
+
+    /// Get window title with file name and modified indicator
+    fn window_title(&self) -> String {
+        let file_name = self.current_file
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("Untitled");
+
+        let modified = if self.is_modified { " *" } else { "" };
+        let read_only = if self.lock_holder.is_some() { " [Read-Only]" } else { "" };
+
+        format!("{}{}{} - Stratify", file_name, modified, read_only)
     }
 }
 
@@ -91,9 +116,18 @@ impl App {
 
 #[derive(Debug, Clone)]
 enum Message {
-    // Input field changes
+    // File operations
+    NewProject,
+    OpenProject,
+    SaveProject,
+    SaveProjectAs,
+
+    // Project info changes
     EngineerNameChanged(String),
     JobIdChanged(String),
+    ClientChanged(String),
+
+    // Beam input field changes
     BeamLabelChanged(String),
     SpanChanged(String),
     LoadChanged(String),
@@ -105,6 +139,7 @@ enum Message {
     GradeSelected(WoodGrade),
 
     // Actions
+    AddBeamToProject,
     Calculate,
     ExportPdf,
     ClearResults,
@@ -117,12 +152,35 @@ enum Message {
 impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            // File operations
+            Message::NewProject => {
+                self.new_project();
+            }
+            Message::OpenProject => {
+                self.open_project();
+            }
+            Message::SaveProject => {
+                self.save_project();
+            }
+            Message::SaveProjectAs => {
+                self.save_project_as();
+            }
+
+            // Project info
             Message::EngineerNameChanged(value) => {
-                self.engineer_name = value;
+                self.project.meta.engineer = value;
+                self.mark_modified();
             }
             Message::JobIdChanged(value) => {
-                self.job_id = value;
+                self.project.meta.job_id = value;
+                self.mark_modified();
             }
+            Message::ClientChanged(value) => {
+                self.project.meta.client = value;
+                self.mark_modified();
+            }
+
+            // Beam fields
             Message::BeamLabelChanged(value) => {
                 self.beam_label = value;
             }
@@ -144,6 +202,11 @@ impl App {
             Message::GradeSelected(grade) => {
                 self.selected_grade = Some(grade);
             }
+
+            // Actions
+            Message::AddBeamToProject => {
+                self.add_beam_to_project();
+            }
             Message::Calculate => {
                 self.run_calculation();
             }
@@ -157,6 +220,207 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    fn mark_modified(&mut self) {
+        if self.lock_holder.is_none() {
+            self.is_modified = true;
+        }
+    }
+
+    fn new_project(&mut self) {
+        // TODO: Check for unsaved changes and prompt
+        self.project = Project::new("Engineer", "25-001", "Client");
+        self.current_file = None;
+        self.is_modified = false;
+        self.lock_holder = None;
+        self.current_beam_id = None;
+        self.result = None;
+        self.error_message = None;
+        self.status = "New project created".to_string();
+    }
+
+    fn open_project(&mut self) {
+        // Show file dialog
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Open Project")
+            .add_filter("Stratify Project", &["stf"])
+            .add_filter("All Files", &["*"])
+            .pick_file()
+        {
+            // Try to acquire lock
+            let username = whoami::username();
+            match FileLock::acquire(&path, &username) {
+                Ok(lock) => {
+                    // We got the lock, load the project
+                    match load_project(&path) {
+                        Ok(project) => {
+                            // Release lock immediately since we're not keeping it in state
+                            // (In a real app, we'd store the lock)
+                            drop(lock);
+
+                            self.project = project;
+                            self.current_file = Some(path.clone());
+                            self.is_modified = false;
+                            self.lock_holder = None;
+                            self.result = None;
+                            self.error_message = None;
+                            self.status = format!("Opened: {}", path.display());
+                        }
+                        Err(e) => {
+                            self.status = format!("Failed to open: {}", e);
+                        }
+                    }
+                }
+                Err(calc_core::errors::CalcError::FileLocked { locked_by, .. }) => {
+                    // File is locked, open read-only
+                    match load_project(&path) {
+                        Ok(project) => {
+                            self.project = project;
+                            self.current_file = Some(path.clone());
+                            self.is_modified = false;
+                            self.lock_holder = Some(locked_by.clone());
+                            self.result = None;
+                            self.error_message = None;
+                            self.status = format!("Opened read-only (locked by {})", locked_by);
+                        }
+                        Err(e) => {
+                            self.status = format!("Failed to open: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.status = format!("Failed to open: {}", e);
+                }
+            }
+        }
+    }
+
+    fn save_project(&mut self) {
+        if self.lock_holder.is_some() {
+            self.status = "Cannot save: file is read-only".to_string();
+            return;
+        }
+
+        if let Some(ref path) = self.current_file {
+            self.do_save(path.clone());
+        } else {
+            self.save_project_as();
+        }
+    }
+
+    fn save_project_as(&mut self) {
+        if self.lock_holder.is_some() {
+            self.status = "Cannot save: file is read-only".to_string();
+            return;
+        }
+
+        let default_name = self.current_file
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("project.stf");
+
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Save Project As")
+            .set_file_name(default_name)
+            .add_filter("Stratify Project", &["stf"])
+            .save_file()
+        {
+            self.do_save(path);
+        }
+    }
+
+    fn do_save(&mut self, path: PathBuf) {
+        // Update modified timestamp
+        self.project.meta.modified = chrono::Utc::now();
+
+        // Acquire lock, save, release
+        let username = whoami::username();
+        match FileLock::acquire(&path, &username) {
+            Ok(lock) => {
+                match save_project(&self.project, &path) {
+                    Ok(()) => {
+                        self.current_file = Some(path.clone());
+                        self.is_modified = false;
+                        self.status = format!("Saved: {}", path.display());
+                    }
+                    Err(e) => {
+                        self.status = format!("Save failed: {}", e);
+                    }
+                }
+                drop(lock);
+            }
+            Err(e) => {
+                self.status = format!("Cannot save (lock failed): {}", e);
+            }
+        }
+    }
+
+    fn add_beam_to_project(&mut self) {
+        if self.lock_holder.is_some() {
+            self.status = "Cannot modify: file is read-only".to_string();
+            return;
+        }
+
+        // Parse and validate
+        let span_ft = match self.span_ft.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => {
+                self.error_message = Some("Invalid span value".to_string());
+                return;
+            }
+        };
+        let load_plf = match self.load_plf.parse::<f64>() {
+            Ok(v) => v,
+            _ => {
+                self.error_message = Some("Invalid load value".to_string());
+                return;
+            }
+        };
+        let width_in = match self.width_in.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => {
+                self.error_message = Some("Invalid width value".to_string());
+                return;
+            }
+        };
+        let depth_in = match self.depth_in.parse::<f64>() {
+            Ok(v) if v > 0.0 => v,
+            _ => {
+                self.error_message = Some("Invalid depth value".to_string());
+                return;
+            }
+        };
+        let species = match self.selected_species {
+            Some(s) => s,
+            None => {
+                self.error_message = Some("Please select a wood species".to_string());
+                return;
+            }
+        };
+        let grade = match self.selected_grade {
+            Some(g) => g,
+            None => {
+                self.error_message = Some("Please select a wood grade".to_string());
+                return;
+            }
+        };
+
+        let beam = BeamInput {
+            label: self.beam_label.clone(),
+            span_ft,
+            uniform_load_plf: load_plf,
+            material: WoodMaterial::new(species, grade),
+            width_in,
+            depth_in,
+        };
+
+        let id = self.project.add_item(CalculationItem::Beam(beam));
+        self.current_beam_id = Some(id);
+        self.mark_modified();
+        self.error_message = None;
+        self.status = format!("Added beam '{}' to project", self.beam_label);
     }
 
     fn run_calculation(&mut self) {
@@ -262,7 +526,7 @@ impl App {
         };
 
         // Generate PDF
-        match render_beam_pdf(&input, result, &self.engineer_name, &self.job_id) {
+        match render_beam_pdf(&input, result, &self.project.meta.engineer, &self.project.meta.job_id) {
             Ok(pdf_bytes) => {
                 // Use file dialog to save
                 if let Some(path) = rfd::FileDialog::new()
@@ -271,7 +535,7 @@ impl App {
                     .add_filter("PDF", &["pdf"])
                     .save_file()
                 {
-                    match fs::write(&path, &pdf_bytes) {
+                    match std::fs::write(&path, &pdf_bytes) {
                         Ok(_) => {
                             self.status = format!("PDF saved to: {}", path.display());
                         }
@@ -305,9 +569,12 @@ impl App {
         .spacing(20);
 
         let main_content = column![
-            // Header
+            // Header with file operations
             self.view_header(),
             horizontal_rule(2),
+            // Toolbar
+            self.view_toolbar(),
+            horizontal_rule(1),
             vertical_space().height(10),
             // Main content
             content,
@@ -325,12 +592,39 @@ impl App {
     }
 
     fn view_header(&self) -> Element<'_, Message> {
+        let title = self.window_title();
         row![
             text("Stratify").size(28),
             horizontal_space(),
-            text("Structural Engineering Suite").size(14),
+            text(title).size(14),
         ]
         .align_y(Alignment::Center)
+        .into()
+    }
+
+    fn view_toolbar(&self) -> Element<'_, Message> {
+        let file_buttons = row![
+            button("New")
+                .on_press(Message::NewProject)
+                .padding(Padding::from([6, 12])),
+            button("Open")
+                .on_press(Message::OpenProject)
+                .padding(Padding::from([6, 12])),
+            button("Save")
+                .on_press(Message::SaveProject)
+                .padding(Padding::from([6, 12])),
+            button("Save As")
+                .on_press(Message::SaveProjectAs)
+                .padding(Padding::from([6, 12])),
+        ]
+        .spacing(8);
+
+        row![
+            file_buttons,
+            horizontal_space(),
+            // Could add more toolbar sections here
+        ]
+        .padding(Padding::from([8, 0]))
         .into()
     }
 
@@ -338,8 +632,9 @@ impl App {
         let project_section = column![
             text("Project Information").size(16),
             vertical_space().height(10),
-            labeled_input("Engineer:", &self.engineer_name, Message::EngineerNameChanged),
-            labeled_input("Job ID:", &self.job_id, Message::JobIdChanged),
+            labeled_input("Engineer:", &self.project.meta.engineer, Message::EngineerNameChanged),
+            labeled_input("Job ID:", &self.project.meta.job_id, Message::JobIdChanged),
+            labeled_input("Client:", &self.project.meta.client, Message::ClientChanged),
         ]
         .spacing(8);
 
@@ -377,19 +672,25 @@ impl App {
         ]
         .spacing(4);
 
-        let buttons = row![
+        let calc_buttons = row![
             button("Calculate")
                 .on_press(Message::Calculate)
-                .padding(Padding::from([8, 20])),
-            horizontal_space().width(10),
+                .padding(Padding::from([8, 16])),
+            button("Add to Project")
+                .on_press(Message::AddBeamToProject)
+                .padding(Padding::from([8, 16])),
+        ]
+        .spacing(8);
+
+        let export_buttons = row![
             button("Export PDF")
                 .on_press(Message::ExportPdf)
-                .padding(Padding::from([8, 20])),
-            horizontal_space().width(10),
+                .padding(Padding::from([8, 16])),
             button("Clear")
                 .on_press(Message::ClearResults)
-                .padding(Padding::from([8, 20])),
-        ];
+                .padding(Padding::from([8, 16])),
+        ]
+        .spacing(8);
 
         let panel = column![
             project_section,
@@ -398,7 +699,9 @@ impl App {
             vertical_space().height(20),
             material_section,
             vertical_space().height(20),
-            buttons,
+            calc_buttons,
+            vertical_space().height(10),
+            export_buttons,
         ]
         .width(Length::FillPortion(2))
         .padding(10);
@@ -419,11 +722,8 @@ impl App {
         } else if let Some(ref result) = self.result {
             self.view_calculation_results(result)
         } else {
-            column![
-                text("Results").size(16),
-                vertical_space().height(10),
-                text("Enter beam parameters and click Calculate").size(14),
-            ]
+            // Show project summary
+            self.view_project_summary()
         };
 
         let panel = container(scrollable(content.padding(10)))
@@ -432,6 +732,36 @@ impl App {
             .padding(10);
 
         panel.into()
+    }
+
+    fn view_project_summary(&self) -> Column<'_, Message> {
+        let item_count = self.project.item_count();
+
+        let mut items_list = column![
+            text("Project Items").size(14),
+        ].spacing(4);
+
+        if item_count == 0 {
+            items_list = items_list.push(text("No items yet. Add a beam to get started.").size(12));
+        } else {
+            for (id, item) in &self.project.items {
+                let label = format!("{}: {} ({})", item.calc_type(), item.label(), &id.to_string()[..8]);
+                items_list = items_list.push(text(label).size(12));
+            }
+        }
+
+        column![
+            text("Project Summary").size(16),
+            vertical_space().height(10),
+            text(format!("Engineer: {}", self.project.meta.engineer)).size(12),
+            text(format!("Job ID: {}", self.project.meta.job_id)).size(12),
+            text(format!("Client: {}", self.project.meta.client)).size(12),
+            text(format!("Items: {}", item_count)).size(12),
+            vertical_space().height(15),
+            items_list,
+            vertical_space().height(15),
+            text("Enter beam parameters and click Calculate").size(12),
+        ]
     }
 
     fn view_calculation_results(&self, result: &BeamResult) -> Column<'_, Message> {
@@ -482,9 +812,26 @@ impl App {
     }
 
     fn view_status_bar(&self) -> Element<'_, Message> {
-        row![text(&self.status).size(12),]
-            .padding(Padding::from([5, 0]))
-            .into()
+        let file_info = match &self.current_file {
+            Some(path) => path.display().to_string(),
+            None => "Untitled".to_string(),
+        };
+
+        let lock_info = match &self.lock_holder {
+            Some(holder) => format!(" [Locked by: {}]", holder),
+            None => String::new(),
+        };
+
+        let modified_indicator = if self.is_modified { " *" } else { "" };
+
+        row![
+            text(format!("{}{}", file_info, modified_indicator)).size(11),
+            text(lock_info).size(11).color([0.6, 0.3, 0.0]),
+            horizontal_space(),
+            text(&self.status).size(11),
+        ]
+        .padding(Padding::from([5, 0]))
+        .into()
     }
 }
 
@@ -507,4 +854,3 @@ fn labeled_input<'a>(
     .align_y(Alignment::Center)
     .into()
 }
-

@@ -14,8 +14,11 @@ path = "src/main.rs"
 calc_core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
 iced = { workspace = true }
 rfd = "0.15"
+whoami = "1.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native-only dependencies
