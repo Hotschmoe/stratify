@@ -13,13 +13,13 @@
 //! ```rust,no_run
 //! use calc_core::pdf::render_beam_pdf;
 //! use calc_core::calculations::beam::{BeamInput, calculate};
-//! use calc_core::materials::{WoodSpecies, WoodGrade, WoodMaterial};
+//! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 //!
 //! let input = BeamInput {
 //!     label: "B-1".to_string(),
 //!     span_ft: 12.0,
 //!     uniform_load_plf: 150.0,
-//!     material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+//!     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 //!     width_in: 1.5,
 //!     depth_in: 9.25,
 //! };
@@ -342,13 +342,13 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 /// ```rust,no_run
 /// use calc_core::pdf::render_beam_pdf;
 /// use calc_core::calculations::beam::{BeamInput, calculate};
-/// use calc_core::materials::{WoodSpecies, WoodGrade, WoodMaterial};
+/// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 ///
 /// let input = BeamInput {
 ///     label: "B-1".to_string(),
 ///     span_ft: 12.0,
 ///     uniform_load_plf: 150.0,
-///     material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 ///     width_in: 1.5,
 ///     depth_in: 9.25,
 /// };
@@ -374,11 +374,7 @@ pub fn render_beam_pdf(
         .replace("{{DEPTH_IN}}", &format!("{:.2}", input.depth_in))
         .replace(
             "{{MATERIAL}}",
-            &format!(
-                "{} {}",
-                input.material.species.display_name(),
-                input.material.grade.display_name()
-            ),
+            &input.material.display_name(),
         )
         .replace("{{SECTION_MODULUS}}", &format!("{:.2}", result.section_modulus_in3))
         .replace("{{MOMENT_INERTIA}}", &format!("{:.2}", result.moment_of_inertia_in4))
@@ -682,11 +678,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {deflection_in} "in" $
             load_plf = format!("{:.0}", input.uniform_load_plf),
             width_in = format!("{:.2}", input.width_in),
             depth_in = format!("{:.2}", input.depth_in),
-            material = format!(
-                "{} {}",
-                input.material.species.display_name(),
-                input.material.grade.display_name()
-            ),
+            material = input.material.display_name(),
             section_modulus = format!("{:.2}", result.section_modulus_in3),
             moment_inertia = format!("{:.2}", result.moment_of_inertia_in4),
             fb_ref = format!("{:.0}", result.fb_reference_psi),
@@ -788,7 +780,7 @@ fn build_summary_rows(beams: &[(&BeamInput, BeamResult)]) -> String {
 mod tests {
     use super::*;
     use crate::calculations::beam::calculate;
-    use crate::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+    use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
     #[test]
     fn test_pdf_generation() {
@@ -796,7 +788,10 @@ mod tests {
             label: "B-1 Test Beam".to_string(),
             span_ft: 12.0,
             uniform_load_plf: 100.0,
-            material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
             width_in: 1.5,
             depth_in: 9.25,
         };

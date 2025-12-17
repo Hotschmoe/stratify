@@ -11,7 +11,7 @@
 use std::io::{self, BufRead, Write};
 
 use calc_core::calculations::beam::{calculate, BeamInput};
-use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+use calc_core::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
 fn main() {
     println!("Stratify CLI - Structural Engineering Calculator");
@@ -44,7 +44,10 @@ fn main() {
         label: "CLI-Demo".to_string(),
         span_ft,
         uniform_load_plf: load_plf,
-        material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+        material: Material::SawnLumber(WoodMaterial::new(
+            WoodSpecies::DouglasFirLarch,
+            WoodGrade::No2,
+        )),
         width_in: 1.5,
         depth_in: 9.25,
     };

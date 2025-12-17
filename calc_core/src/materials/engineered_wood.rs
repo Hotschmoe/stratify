@@ -1,0 +1,643 @@
+//! Engineered Wood Products
+//!
+//! Reference design values for structural composite lumber products:
+//! - Glulam (Structural Glued Laminated Timber) - NDS-S
+//! - LVL (Laminated Veneer Lumber)
+//! - PSL (Parallel Strand Lumber)
+
+use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// Glulam (Structural Glued Laminated Timber)
+// ============================================================================
+
+/// Glulam stress class per ANSI/APA PRG 320 and NDS-S
+///
+/// The naming convention: FbValue-EValue (e.g., 24F-1.8E means Fb=2400 psi, E=1.8 million psi)
+/// V-grades (e.g., 24F-V4) are for visually graded tension laminations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(non_camel_case_types)] // Industry standard naming
+pub enum GlulamStressClass {
+    /// 16F-1.3E - Economy grade
+    #[serde(rename = "16F-1.3E")]
+    F16_E1_3,
+    /// 20F-1.5E - Standard grade
+    #[serde(rename = "20F-1.5E")]
+    F20_E1_5,
+    /// 24F-1.7E
+    #[serde(rename = "24F-1.7E")]
+    F24_E1_7,
+    /// 24F-1.8E - Common structural grade
+    #[serde(rename = "24F-1.8E")]
+    F24_E1_8,
+    /// 26F-1.9E - High strength
+    #[serde(rename = "26F-1.9E")]
+    F26_E1_9,
+    /// 24F-V4 - Visually graded, common for beams
+    #[serde(rename = "24F-V4")]
+    F24_V4,
+    /// 24F-V8 - Visually graded, balanced layup
+    #[serde(rename = "24F-V8")]
+    F24_V8,
+}
+
+impl GlulamStressClass {
+    /// All stress classes for UI selection
+    pub const ALL: [GlulamStressClass; 7] = [
+        GlulamStressClass::F16_E1_3,
+        GlulamStressClass::F20_E1_5,
+        GlulamStressClass::F24_E1_7,
+        GlulamStressClass::F24_E1_8,
+        GlulamStressClass::F26_E1_9,
+        GlulamStressClass::F24_V4,
+        GlulamStressClass::F24_V8,
+    ];
+
+    /// Display name for UI
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            GlulamStressClass::F16_E1_3 => "16F-1.3E",
+            GlulamStressClass::F20_E1_5 => "20F-1.5E",
+            GlulamStressClass::F24_E1_7 => "24F-1.7E",
+            GlulamStressClass::F24_E1_8 => "24F-1.8E",
+            GlulamStressClass::F26_E1_9 => "26F-1.9E",
+            GlulamStressClass::F24_V4 => "24F-V4",
+            GlulamStressClass::F24_V8 => "24F-V8",
+        }
+    }
+}
+
+impl std::fmt::Display for GlulamStressClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// Glulam layup orientation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum GlulamLayup {
+    /// Balanced - tension and compression lams are equal (same Fb+ and Fb-)
+    #[default]
+    Balanced,
+    /// Unbalanced - optimized for positive bending (tension face has higher grade lams)
+    /// Fb+ > Fb- (use Fb- for negative moment regions)
+    Unbalanced,
+}
+
+impl GlulamLayup {
+    pub const ALL: [GlulamLayup; 2] = [GlulamLayup::Balanced, GlulamLayup::Unbalanced];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            GlulamLayup::Balanced => "Balanced",
+            GlulamLayup::Unbalanced => "Unbalanced",
+        }
+    }
+}
+
+impl std::fmt::Display for GlulamLayup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// Reference design values for Glulam per NDS-S
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GlulamProperties {
+    /// Stress class
+    pub stress_class: GlulamStressClass,
+    /// Bending stress Fb+ for positive bending (tension on bottom, psi)
+    pub fb_pos_psi: f64,
+    /// Bending stress Fb- for negative bending (tension on top, psi)
+    /// For balanced layups, fb_neg_psi == fb_pos_psi
+    pub fb_neg_psi: f64,
+    /// Tension parallel Ft (psi)
+    pub ft_psi: f64,
+    /// Shear Fv (psi)
+    pub fv_psi: f64,
+    /// Compression perpendicular Fc_perp (psi)
+    pub fc_perp_psi: f64,
+    /// Compression parallel Fc (psi)
+    pub fc_psi: f64,
+    /// Modulus of elasticity E (psi)
+    pub e_psi: f64,
+    /// Minimum E for stability Emin (psi)
+    pub e_min_psi: f64,
+    /// Specific gravity
+    pub specific_gravity: f64,
+}
+
+impl GlulamProperties {
+    /// Look up glulam properties by stress class
+    ///
+    /// Values are approximate based on NDS-S Table 5A/5B for Western Species.
+    /// For unbalanced layups, fb_neg_psi is lower than fb_pos_psi.
+    pub fn lookup(stress_class: GlulamStressClass) -> Self {
+        match stress_class {
+            GlulamStressClass::F16_E1_3 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 1600.0,
+                fb_neg_psi: 1600.0,
+                ft_psi: 800.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 560.0,
+                fc_psi: 1400.0,
+                e_psi: 1_300_000.0,
+                e_min_psi: 685_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F20_E1_5 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2000.0,
+                fb_neg_psi: 2000.0,
+                ft_psi: 1000.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 560.0,
+                fc_psi: 1550.0,
+                e_psi: 1_500_000.0,
+                e_min_psi: 790_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F24_E1_7 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2400.0,
+                fb_neg_psi: 2400.0,
+                ft_psi: 1150.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 650.0,
+                fc_psi: 1650.0,
+                e_psi: 1_700_000.0,
+                e_min_psi: 895_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F24_E1_8 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2400.0,
+                fb_neg_psi: 2400.0,
+                ft_psi: 1150.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 650.0,
+                fc_psi: 1650.0,
+                e_psi: 1_800_000.0,
+                e_min_psi: 950_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F26_E1_9 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2600.0,
+                fb_neg_psi: 2600.0,
+                ft_psi: 1250.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 650.0,
+                fc_psi: 1750.0,
+                e_psi: 1_900_000.0,
+                e_min_psi: 1_000_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F24_V4 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2400.0,
+                fb_neg_psi: 1450.0, // Unbalanced - lower for negative bending
+                ft_psi: 1100.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 650.0,
+                fc_psi: 1600.0,
+                e_psi: 1_800_000.0,
+                e_min_psi: 950_000.0,
+                specific_gravity: 0.50,
+            },
+            GlulamStressClass::F24_V8 => GlulamProperties {
+                stress_class,
+                fb_pos_psi: 2400.0,
+                fb_neg_psi: 2400.0, // Balanced
+                ft_psi: 1100.0,
+                fv_psi: 265.0,
+                fc_perp_psi: 650.0,
+                fc_psi: 1600.0,
+                e_psi: 1_800_000.0,
+                e_min_psi: 950_000.0,
+                specific_gravity: 0.50,
+            },
+        }
+    }
+
+    /// Get Fb to use based on moment direction and layup
+    pub fn fb_for_moment(&self, is_positive_moment: bool, layup: GlulamLayup) -> f64 {
+        match (is_positive_moment, layup) {
+            (true, _) => self.fb_pos_psi,
+            (false, GlulamLayup::Balanced) => self.fb_pos_psi,
+            (false, GlulamLayup::Unbalanced) => self.fb_neg_psi,
+        }
+    }
+}
+
+/// Glulam material specification
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlulamMaterial {
+    /// Stress class (e.g., 24F-V4)
+    pub stress_class: GlulamStressClass,
+    /// Layup type
+    pub layup: GlulamLayup,
+}
+
+impl GlulamMaterial {
+    pub fn new(stress_class: GlulamStressClass, layup: GlulamLayup) -> Self {
+        Self { stress_class, layup }
+    }
+
+    /// Get properties for this material
+    pub fn properties(&self) -> GlulamProperties {
+        GlulamProperties::lookup(self.stress_class)
+    }
+
+    /// Get display name
+    pub fn display_name(&self) -> String {
+        format!("Glulam {} ({})", self.stress_class, self.layup)
+    }
+}
+
+impl Default for GlulamMaterial {
+    fn default() -> Self {
+        Self {
+            stress_class: GlulamStressClass::F24_V4,
+            layup: GlulamLayup::Unbalanced,
+        }
+    }
+}
+
+impl std::fmt::Display for GlulamMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ============================================================================
+// LVL (Laminated Veneer Lumber)
+// ============================================================================
+
+/// LVL grade designations (manufacturer-independent approach)
+///
+/// LVL properties vary by manufacturer. These grades represent common
+/// property ranges available in the market.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum LvlGrade {
+    /// Standard structural LVL (E ~2.0 million psi, Fb ~2600 psi)
+    #[default]
+    #[serde(rename = "LVL-2.0E")]
+    Standard,
+    /// High-strength LVL (E ~2.2 million psi, Fb ~2900 psi)
+    #[serde(rename = "LVL-2.2E")]
+    HighStrength,
+}
+
+impl LvlGrade {
+    pub const ALL: [LvlGrade; 2] = [LvlGrade::Standard, LvlGrade::HighStrength];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            LvlGrade::Standard => "LVL 2.0E",
+            LvlGrade::HighStrength => "LVL 2.2E",
+        }
+    }
+}
+
+impl std::fmt::Display for LvlGrade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// Reference design values for LVL
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LvlProperties {
+    /// Grade
+    pub grade: LvlGrade,
+    /// Bending stress Fb (psi) - base value at 12" depth
+    pub fb_psi: f64,
+    /// Tension parallel Ft (psi)
+    pub ft_psi: f64,
+    /// Shear Fv (psi)
+    pub fv_psi: f64,
+    /// Compression perpendicular Fc_perp (psi)
+    pub fc_perp_psi: f64,
+    /// Compression parallel Fc (psi)
+    pub fc_psi: f64,
+    /// Modulus of elasticity E (psi)
+    pub e_psi: f64,
+    /// Minimum E for stability Emin (psi)
+    pub e_min_psi: f64,
+    /// Specific gravity
+    pub specific_gravity: f64,
+}
+
+impl LvlProperties {
+    /// Look up LVL properties by grade
+    pub fn lookup(grade: LvlGrade) -> Self {
+        match grade {
+            LvlGrade::Standard => LvlProperties {
+                grade,
+                fb_psi: 2600.0,
+                ft_psi: 1950.0,
+                fv_psi: 285.0,
+                fc_perp_psi: 750.0,
+                fc_psi: 2510.0,
+                e_psi: 2_000_000.0,
+                e_min_psi: 1_030_000.0,
+                specific_gravity: 0.50,
+            },
+            LvlGrade::HighStrength => LvlProperties {
+                grade,
+                fb_psi: 2900.0,
+                ft_psi: 2175.0,
+                fv_psi: 285.0,
+                fc_perp_psi: 750.0,
+                fc_psi: 2800.0,
+                e_psi: 2_200_000.0,
+                e_min_psi: 1_130_000.0,
+                specific_gravity: 0.50,
+            },
+        }
+    }
+
+    /// Apply depth adjustment for LVL bending
+    ///
+    /// LVL has a depth factor similar to sawn lumber. Common approach:
+    /// For d > 12": Fb' = Fb * (12/d)^0.111
+    pub fn adjusted_fb(&self, depth_in: f64) -> f64 {
+        if depth_in > 12.0 {
+            self.fb_psi * (12.0 / depth_in).powf(0.111)
+        } else {
+            self.fb_psi
+        }
+    }
+}
+
+/// LVL material specification
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LvlMaterial {
+    /// Grade designation
+    pub grade: LvlGrade,
+}
+
+impl LvlMaterial {
+    pub fn new(grade: LvlGrade) -> Self {
+        Self { grade }
+    }
+
+    /// Get properties for this material
+    pub fn properties(&self) -> LvlProperties {
+        LvlProperties::lookup(self.grade)
+    }
+
+    /// Get display name
+    pub fn display_name(&self) -> String {
+        self.grade.display_name().to_string()
+    }
+}
+
+impl Default for LvlMaterial {
+    fn default() -> Self {
+        Self {
+            grade: LvlGrade::Standard,
+        }
+    }
+}
+
+impl std::fmt::Display for LvlMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ============================================================================
+// PSL (Parallel Strand Lumber)
+// ============================================================================
+
+/// PSL grade designations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum PslGrade {
+    /// Standard PSL (E ~2.0 million psi)
+    #[default]
+    #[serde(rename = "PSL-2.0E")]
+    Standard,
+}
+
+impl PslGrade {
+    pub const ALL: [PslGrade; 1] = [PslGrade::Standard];
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            PslGrade::Standard => "PSL 2.0E",
+        }
+    }
+}
+
+impl std::fmt::Display for PslGrade {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// Reference design values for PSL
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PslProperties {
+    /// Grade
+    pub grade: PslGrade,
+    /// Bending stress Fb (psi)
+    pub fb_psi: f64,
+    /// Tension parallel Ft (psi)
+    pub ft_psi: f64,
+    /// Shear Fv (psi)
+    pub fv_psi: f64,
+    /// Compression perpendicular Fc_perp (psi)
+    pub fc_perp_psi: f64,
+    /// Compression parallel Fc (psi)
+    pub fc_psi: f64,
+    /// Modulus of elasticity E (psi)
+    pub e_psi: f64,
+    /// Minimum E for stability Emin (psi)
+    pub e_min_psi: f64,
+    /// Specific gravity
+    pub specific_gravity: f64,
+}
+
+impl PslProperties {
+    /// Look up PSL properties by grade
+    pub fn lookup(grade: PslGrade) -> Self {
+        match grade {
+            PslGrade::Standard => PslProperties {
+                grade,
+                fb_psi: 2900.0,
+                ft_psi: 2025.0,
+                fv_psi: 290.0,
+                fc_perp_psi: 750.0,
+                fc_psi: 2900.0,
+                e_psi: 2_000_000.0,
+                e_min_psi: 1_030_000.0,
+                specific_gravity: 0.50,
+            },
+        }
+    }
+
+    /// Apply depth adjustment for PSL bending (similar to LVL)
+    pub fn adjusted_fb(&self, depth_in: f64) -> f64 {
+        if depth_in > 12.0 {
+            self.fb_psi * (12.0 / depth_in).powf(0.111)
+        } else {
+            self.fb_psi
+        }
+    }
+}
+
+/// PSL material specification
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PslMaterial {
+    /// Grade designation
+    pub grade: PslGrade,
+}
+
+impl PslMaterial {
+    pub fn new(grade: PslGrade) -> Self {
+        Self { grade }
+    }
+
+    /// Get properties for this material
+    pub fn properties(&self) -> PslProperties {
+        PslProperties::lookup(self.grade)
+    }
+
+    /// Get display name
+    pub fn display_name(&self) -> String {
+        self.grade.display_name().to_string()
+    }
+}
+
+impl Default for PslMaterial {
+    fn default() -> Self {
+        Self {
+            grade: PslGrade::Standard,
+        }
+    }
+}
+
+impl std::fmt::Display for PslMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Glulam tests
+    #[test]
+    fn test_glulam_24f_v4_properties() {
+        let props = GlulamProperties::lookup(GlulamStressClass::F24_V4);
+        assert_eq!(props.fb_pos_psi, 2400.0);
+        assert_eq!(props.fb_neg_psi, 1450.0); // Unbalanced
+        assert_eq!(props.e_psi, 1_800_000.0);
+    }
+
+    #[test]
+    fn test_glulam_balanced_fb() {
+        let props = GlulamProperties::lookup(GlulamStressClass::F24_V8);
+        assert_eq!(props.fb_pos_psi, props.fb_neg_psi); // Balanced
+    }
+
+    #[test]
+    fn test_glulam_fb_for_moment() {
+        let props = GlulamProperties::lookup(GlulamStressClass::F24_V4);
+
+        // Positive moment
+        assert_eq!(props.fb_for_moment(true, GlulamLayup::Unbalanced), 2400.0);
+        // Negative moment with unbalanced
+        assert_eq!(props.fb_for_moment(false, GlulamLayup::Unbalanced), 1450.0);
+        // Negative moment with balanced
+        assert_eq!(props.fb_for_moment(false, GlulamLayup::Balanced), 2400.0);
+    }
+
+    #[test]
+    fn test_glulam_material_display() {
+        let mat = GlulamMaterial::new(GlulamStressClass::F24_V4, GlulamLayup::Unbalanced);
+        assert_eq!(mat.display_name(), "Glulam 24F-V4 (Unbalanced)");
+    }
+
+    #[test]
+    fn test_glulam_serialization() {
+        let mat = GlulamMaterial::new(GlulamStressClass::F24_E1_8, GlulamLayup::Balanced);
+        let json = serde_json::to_string(&mat).unwrap();
+        let parsed: GlulamMaterial = serde_json::from_str(&json).unwrap();
+        assert_eq!(mat.stress_class, parsed.stress_class);
+        assert_eq!(mat.layup, parsed.layup);
+    }
+
+    // LVL tests
+    #[test]
+    fn test_lvl_standard_properties() {
+        let props = LvlProperties::lookup(LvlGrade::Standard);
+        assert_eq!(props.fb_psi, 2600.0);
+        assert_eq!(props.e_psi, 2_000_000.0);
+    }
+
+    #[test]
+    fn test_lvl_depth_adjustment() {
+        let props = LvlProperties::lookup(LvlGrade::Standard);
+        let fb_12 = props.adjusted_fb(12.0);
+        let fb_18 = props.adjusted_fb(18.0);
+
+        // Base value at 12"
+        assert_eq!(fb_12, props.fb_psi);
+        // Deeper member should have lower adjusted Fb
+        assert!(fb_18 < fb_12);
+        // Check approximate value: (12/18)^0.111 ≈ 0.956
+        assert!((fb_18 / props.fb_psi - 0.956).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lvl_serialization() {
+        let mat = LvlMaterial::new(LvlGrade::HighStrength);
+        let json = serde_json::to_string(&mat).unwrap();
+        assert!(json.contains("LVL-2.2E"));
+        let parsed: LvlMaterial = serde_json::from_str(&json).unwrap();
+        assert_eq!(mat.grade, parsed.grade);
+    }
+
+    // PSL tests
+    #[test]
+    fn test_psl_standard_properties() {
+        let props = PslProperties::lookup(PslGrade::Standard);
+        assert_eq!(props.fb_psi, 2900.0);
+        assert_eq!(props.e_psi, 2_000_000.0);
+    }
+
+    #[test]
+    fn test_psl_depth_adjustment() {
+        let props = PslProperties::lookup(PslGrade::Standard);
+        let fb_12 = props.adjusted_fb(12.0);
+        let fb_16 = props.adjusted_fb(16.0);
+
+        assert_eq!(fb_12, props.fb_psi);
+        assert!(fb_16 < fb_12);
+    }
+
+    #[test]
+    fn test_psl_serialization() {
+        let mat = PslMaterial::new(PslGrade::Standard);
+        let json = serde_json::to_string(&mat).unwrap();
+        assert!(json.contains("PSL-2.0E"));
+    }
+
+    // Default tests
+    #[test]
+    fn test_defaults() {
+        let glulam = GlulamMaterial::default();
+        assert_eq!(glulam.stress_class, GlulamStressClass::F24_V4);
+
+        let lvl = LvlMaterial::default();
+        assert_eq!(lvl.grade, LvlGrade::Standard);
+
+        let psl = PslMaterial::default();
+        assert_eq!(psl.grade, PslGrade::Standard);
+    }
+}

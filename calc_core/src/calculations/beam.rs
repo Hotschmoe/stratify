@@ -6,7 +6,7 @@
 //!
 //! - Simply-supported (pin-roller) boundary conditions
 //! - Uniform distributed load over full span
-//! - Rectangular sawn lumber section
+//! - Rectangular section (sawn lumber, glulam, LVL, or PSL)
 //! - Dry service conditions (C_M = 1.0)
 //! - Normal temperature (C_t = 1.0)
 //! - Normal load duration (C_D = 1.0) - adjust as needed
@@ -15,14 +15,17 @@
 //!
 //! ```rust
 //! use calc_core::calculations::beam::{BeamInput, calculate};
-//! use calc_core::materials::{WoodSpecies, WoodGrade, WoodMaterial};
+//! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 //!
 //! // Define beam input as would come from JSON
 //! let input = BeamInput {
 //!     label: "B-1".to_string(),
 //!     span_ft: 12.0,
 //!     uniform_load_plf: 150.0,
-//!     material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+//!     material: Material::SawnLumber(WoodMaterial::new(
+//!         WoodSpecies::DouglasFirLarch,
+//!         WoodGrade::No2
+//!     )),
 //!     width_in: 1.5,  // 2x nominal
 //!     depth_in: 9.25, // 10 nominal
 //! };
@@ -38,13 +41,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{CalcError, CalcResult};
-use crate::materials::WoodMaterial;
+use crate::materials::Material;
 
 /// Input parameters for a simply-supported beam.
 ///
 /// All inputs use US customary units for compatibility with US building codes.
+/// Supports sawn lumber, glulam, LVL, and PSL materials.
 ///
-/// ## JSON Example
+/// ## JSON Example (Sawn Lumber)
 ///
 /// ```json
 /// {
@@ -52,11 +56,29 @@ use crate::materials::WoodMaterial;
 ///   "span_ft": 12.0,
 ///   "uniform_load_plf": 150.0,
 ///   "material": {
+///     "type": "SawnLumber",
 ///     "species": "DF-L",
 ///     "grade": "No.2"
 ///   },
 ///   "width_in": 1.5,
 ///   "depth_in": 9.25
+/// }
+/// ```
+///
+/// ## JSON Example (Glulam)
+///
+/// ```json
+/// {
+///   "label": "GLB-1",
+///   "span_ft": 24.0,
+///   "uniform_load_plf": 300.0,
+///   "material": {
+///     "type": "Glulam",
+///     "stress_class": "24F-V4",
+///     "layup": "Unbalanced"
+///   },
+///   "width_in": 5.125,
+///   "depth_in": 16.5
 /// }
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,13 +94,13 @@ pub struct BeamInput {
     /// This should be the total factored load (dead + live) for ASD.
     pub uniform_load_plf: f64,
 
-    /// Wood material (species and grade)
-    pub material: WoodMaterial,
+    /// Material (sawn lumber, glulam, LVL, or PSL)
+    pub material: Material,
 
-    /// Actual beam width in inches (e.g., 1.5 for 2x, 3.5 for 4x)
+    /// Actual beam width in inches (e.g., 1.5 for 2x, 5.125 for glulam)
     pub width_in: f64,
 
-    /// Actual beam depth in inches (e.g., 9.25 for 2x10, 11.25 for 2x12)
+    /// Actual beam depth in inches (e.g., 9.25 for 2x10, 16.5 for glulam)
     pub depth_in: f64,
 }
 
@@ -92,11 +114,11 @@ impl BeamInput {
                 "Span must be positive",
             ));
         }
-        if self.span_ft > 40.0 {
+        if self.span_ft > 60.0 {
             return Err(CalcError::invalid_input(
                 "span_ft",
                 self.span_ft.to_string(),
-                "Span exceeds 40 ft - consider using engineered lumber",
+                "Span exceeds 60 ft - verify member sizing",
             ));
         }
         if self.uniform_load_plf < 0.0 {
@@ -279,13 +301,16 @@ impl BeamResult {
 ///
 /// ```rust
 /// use calc_core::calculations::beam::{BeamInput, calculate};
-/// use calc_core::materials::{WoodSpecies, WoodGrade, WoodMaterial};
+/// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 ///
 /// let input = BeamInput {
 ///     label: "Test Beam".to_string(),
 ///     span_ft: 10.0,
 ///     uniform_load_plf: 100.0,
-///     material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+///     material: Material::SawnLumber(WoodMaterial::new(
+///         WoodSpecies::DouglasFirLarch,
+///         WoodGrade::No2
+///     )),
 ///     width_in: 1.5,
 ///     depth_in: 9.25,
 /// };
@@ -297,8 +322,8 @@ pub fn calculate(input: &BeamInput) -> CalcResult<BeamResult> {
     // Validate inputs
     input.validate()?;
 
-    // Get material properties
-    let props = input.material.properties();
+    // Get material properties (unified interface for all material types)
+    let props = input.material.base_properties();
 
     // Section properties
     let s = input.section_modulus_in3();
@@ -336,18 +361,22 @@ pub fn calculate(input: &BeamInput) -> CalcResult<BeamResult> {
     // C_D = 1.0 (normal duration)
     // C_M = 1.0 (dry service)
     // C_t = 1.0 (normal temperature)
-    // C_F = size factor (simplified)
+    // C_F = size factor (applied via fb_for_depth for LVL/PSL)
     // C_r = 1.0 (not repetitive for single beam)
 
-    // Size factor C_F for bending (NDS Table 4A footnote)
+    // Get Fb adjusted for depth (handles LVL/PSL depth factor automatically)
+    let fb_depth_adjusted = input.material.fb_for_depth(input.depth_in);
+
+    // Additional size factor C_F for sawn lumber bending (NDS Table 4A footnote)
     // For depths > 12", C_F = (12/d)^(1/9)
-    let c_f = if input.depth_in > 12.0 {
+    // Note: LVL/PSL handle this in fb_for_depth, glulam uses volume factor separately
+    let c_f = if !input.material.is_engineered() && input.depth_in > 12.0 {
         (12.0 / input.depth_in).powf(1.0 / 9.0)
     } else {
         1.0
     };
 
-    let allowable_fb_psi = props.fb_psi * c_f;
+    let allowable_fb_psi = fb_depth_adjusted * c_f;
     let allowable_fv_psi = props.fv_psi; // No adjustment for shear in simple case
 
     // === Unity Checks ===
@@ -388,14 +417,17 @@ pub fn calculate(input: &BeamInput) -> CalcResult<BeamResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::materials::{WoodGrade, WoodSpecies};
+    use crate::materials::{WoodGrade, WoodSpecies, WoodMaterial, GlulamMaterial, GlulamStressClass, GlulamLayup, LvlMaterial, LvlGrade};
 
     fn test_beam() -> BeamInput {
         BeamInput {
             label: "Test Beam".to_string(),
             span_ft: 12.0,
             uniform_load_plf: 150.0,
-            material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
             width_in: 1.5,
             depth_in: 9.25,
         }
@@ -458,12 +490,48 @@ mod tests {
             label: "Light Beam".to_string(),
             span_ft: 8.0,
             uniform_load_plf: 50.0,
-            material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
             width_in: 1.5,
             depth_in: 9.25,
         };
         let result = calculate(&beam).unwrap();
         assert!(result.passes());
+    }
+
+    #[test]
+    fn test_glulam_beam() {
+        let beam = BeamInput {
+            label: "Glulam Beam".to_string(),
+            span_ft: 24.0,
+            uniform_load_plf: 200.0,
+            material: Material::Glulam(GlulamMaterial::new(
+                GlulamStressClass::F24_V4,
+                GlulamLayup::Unbalanced,
+            )),
+            width_in: 5.125,
+            depth_in: 16.5,
+        };
+        let result = calculate(&beam).unwrap();
+        // Should have higher allowable Fb than sawn lumber
+        assert!(result.allowable_fb_psi > 2000.0);
+    }
+
+    #[test]
+    fn test_lvl_beam() {
+        let beam = BeamInput {
+            label: "LVL Header".to_string(),
+            span_ft: 12.0,
+            uniform_load_plf: 400.0,
+            material: Material::Lvl(LvlMaterial::new(LvlGrade::Standard)),
+            width_in: 1.75,
+            depth_in: 11.875,
+        };
+        let result = calculate(&beam).unwrap();
+        // LVL should have higher E than sawn lumber
+        assert!(result.e_psi >= 2_000_000.0);
     }
 
     #[test]

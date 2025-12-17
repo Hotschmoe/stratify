@@ -1,26 +1,12 @@
-//! # Materials Database
+//! Sawn Lumber Materials (NDS 2018 Table 4A)
 //!
-//! Material definitions and property lookups for structural engineering.
-//! Currently supports wood (NDS) with steel and concrete planned.
-//!
-//! ## Example
-//!
-//! ```rust
-//! use calc_core::materials::{WoodSpecies, WoodGrade, WoodProperties};
-//!
-//! // Get properties for Douglas Fir-Larch No. 2
-//! let props = WoodProperties::lookup(WoodSpecies::DouglasFirLarch, WoodGrade::No2);
-//! println!("Fb = {} psi", props.fb_psi);
-//! ```
+//! Reference design values for visually graded dimension lumber.
+//! All values are for 2"-4" thick members (2x10 and wider).
 
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{CalcError, CalcResult};
 use crate::units::Psi;
-
-// ============================================================================
-// Wood Materials (NDS)
-// ============================================================================
 
 /// Wood species groups per NDS
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -535,6 +521,17 @@ impl WoodMaterial {
     pub fn properties(&self) -> WoodProperties {
         WoodProperties::lookup(self.species, self.grade)
     }
+
+    /// Get display name
+    pub fn display_name(&self) -> String {
+        format!("{} {}", self.species.display_name(), self.grade.display_name())
+    }
+}
+
+impl std::fmt::Display for WoodMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
 }
 
 #[cfg(test)]
@@ -580,5 +577,11 @@ mod tests {
         let json = serde_json::to_string(&props).unwrap();
         let roundtrip: WoodProperties = serde_json::from_str(&json).unwrap();
         assert_eq!(props.fb_psi, roundtrip.fb_psi);
+    }
+
+    #[test]
+    fn test_material_display() {
+        let mat = WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2);
+        assert_eq!(mat.display_name(), "Douglas Fir-Larch No. 2");
     }
 }

@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::calculations::CalculationItem;
+use crate::loads::DesignMethod;
 
 /// Current schema version for .stf files
 pub const SCHEMA_VERSION: &str = "0.1.0";
@@ -100,7 +101,7 @@ impl Project {
     /// ```rust
     /// use calc_core::project::Project;
     /// use calc_core::calculations::{CalculationItem, BeamInput};
-    /// use calc_core::materials::{WoodSpecies, WoodGrade, WoodMaterial};
+    /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
     ///
     /// let mut project = Project::new("Engineer", "25-001", "Client");
     ///
@@ -108,7 +109,7 @@ impl Project {
     ///     label: "B-1".to_string(),
     ///     span_ft: 12.0,
     ///     uniform_load_plf: 150.0,
-    ///     material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+    ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
     ///     width_in: 1.5,
     ///     depth_in: 9.25,
     /// };
@@ -221,6 +222,9 @@ pub struct GlobalSettings {
 
     /// Default materials for new calculations
     pub default_materials: DefaultMaterials,
+
+    /// Design method (ASD or LRFD) for load combinations
+    pub design_method: DesignMethod,
 }
 
 impl Default for GlobalSettings {
@@ -230,6 +234,7 @@ impl Default for GlobalSettings {
             seismic_design_category: None,
             risk_category: RiskCategory::II,
             default_materials: DefaultMaterials::default(),
+            design_method: DesignMethod::Asd,
         }
     }
 }
@@ -303,7 +308,7 @@ mod tests {
     #[test]
     fn test_add_remove_item() {
         use crate::calculations::{BeamInput, CalculationItem};
-        use crate::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+        use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
         let mut project = Project::new("Engineer", "25-001", "Client");
 
@@ -311,7 +316,10 @@ mod tests {
             label: "B-1".to_string(),
             span_ft: 12.0,
             uniform_load_plf: 150.0,
-            material: WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2),
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
             width_in: 1.5,
             depth_in: 9.25,
         };

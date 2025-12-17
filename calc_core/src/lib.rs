@@ -28,6 +28,7 @@
 //! - [`project`] - Project container, metadata, and settings
 //! - [`calculations`] - All structural calculation types (beams, columns, etc.)
 //! - [`materials`] - Material definitions and databases
+//! - [`loads`] - Load types and ASCE 7 load combinations
 //! - [`units`] - Type-safe unit wrappers
 //! - [`errors`] - Structured error types
 //! - [`file_io`] - File operations with atomic saves and locking
@@ -36,6 +37,7 @@
 pub mod calculations;
 pub mod errors;
 pub mod file_io;
+pub mod loads;
 pub mod materials;
 pub mod pdf;
 pub mod project;
@@ -44,5 +46,7 @@ pub mod units;
 // Re-export commonly used types at crate root for convenience
 pub use errors::{CalcError, CalcResult};
 pub use file_io::{save_project, load_project, FileLock};
+pub use loads::{LoadType, LoadCase, LoadCombination, DesignMethod};
+pub use materials::Material;
 pub use pdf::render_beam_pdf;
 pub use project::{Project, ProjectMetadata, GlobalSettings};

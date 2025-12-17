@@ -20,9 +20,42 @@ use uuid::Uuid;
 use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
 use calc_core::calculations::CalculationItem;
 use calc_core::file_io::{load_project, save_project, FileLock};
-use calc_core::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+use calc_core::materials::{
+    GlulamLayup, GlulamMaterial, GlulamStressClass, LvlGrade, LvlMaterial, Material, PslGrade,
+    PslMaterial, WoodGrade, WoodMaterial, WoodSpecies,
+};
 use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
+
+/// Material type for UI selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaterialType {
+    #[default]
+    SawnLumber,
+    Glulam,
+    Lvl,
+    Psl,
+}
+
+impl MaterialType {
+    pub const ALL: [MaterialType; 4] = [
+        MaterialType::SawnLumber,
+        MaterialType::Glulam,
+        MaterialType::Lvl,
+        MaterialType::Psl,
+    ];
+}
+
+impl std::fmt::Display for MaterialType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaterialType::SawnLumber => write!(f, "Sawn Lumber"),
+            MaterialType::Glulam => write!(f, "Glulam"),
+            MaterialType::Lvl => write!(f, "LVL"),
+            MaterialType::Psl => write!(f, "PSL"),
+        }
+    }
+}
 
 // Embed BerkeleyMono font at compile time
 const BERKELEY_MONO: &[u8] =
@@ -64,8 +97,19 @@ struct App {
     load_plf: String,
     width_in: String,
     depth_in: String,
+
+    // Material selection
+    selected_material_type: MaterialType,
+    // Sawn lumber
     selected_species: Option<WoodSpecies>,
     selected_grade: Option<WoodGrade>,
+    // Glulam
+    selected_glulam_class: Option<GlulamStressClass>,
+    selected_glulam_layup: Option<GlulamLayup>,
+    // LVL
+    selected_lvl_grade: Option<LvlGrade>,
+    // PSL
+    selected_psl_grade: Option<PslGrade>,
 
     // Calculation results (store input too for diagram plotting)
     calc_input: Option<BeamInput>,
@@ -91,8 +135,13 @@ impl Default for App {
             load_plf: "150.0".to_string(),
             width_in: "1.5".to_string(),
             depth_in: "9.25".to_string(),
+            selected_material_type: MaterialType::SawnLumber,
             selected_species: Some(WoodSpecies::DouglasFirLarch),
             selected_grade: Some(WoodGrade::No2),
+            selected_glulam_class: Some(GlulamStressClass::F24_V4),
+            selected_glulam_layup: Some(GlulamLayup::Unbalanced),
+            selected_lvl_grade: Some(LvlGrade::Standard),
+            selected_psl_grade: Some(PslGrade::Standard),
             calc_input: None,
             result: None,
             error_message: None,
@@ -161,8 +210,17 @@ enum Message {
     DepthChanged(String),
 
     // Material selection
+    MaterialTypeSelected(MaterialType),
+    // Sawn lumber
     SpeciesSelected(WoodSpecies),
     GradeSelected(WoodGrade),
+    // Glulam
+    GlulamClassSelected(GlulamStressClass),
+    GlulamLayupSelected(GlulamLayup),
+    // LVL
+    LvlGradeSelected(LvlGrade),
+    // PSL
+    PslGradeSelected(PslGrade),
 
     // Actions
     AddOrUpdateBeam,
@@ -277,11 +335,26 @@ impl App {
             Message::DepthChanged(value) => {
                 self.depth_in = value;
             }
+            Message::MaterialTypeSelected(material_type) => {
+                self.selected_material_type = material_type;
+            }
             Message::SpeciesSelected(species) => {
                 self.selected_species = Some(species);
             }
             Message::GradeSelected(grade) => {
                 self.selected_grade = Some(grade);
+            }
+            Message::GlulamClassSelected(class) => {
+                self.selected_glulam_class = Some(class);
+            }
+            Message::GlulamLayupSelected(layup) => {
+                self.selected_glulam_layup = Some(layup);
+            }
+            Message::LvlGradeSelected(grade) => {
+                self.selected_lvl_grade = Some(grade);
+            }
+            Message::PslGradeSelected(grade) => {
+                self.selected_psl_grade = Some(grade);
             }
 
             // Actions
@@ -476,8 +549,29 @@ impl App {
                 self.load_plf = beam.uniform_load_plf.to_string();
                 self.width_in = beam.width_in.to_string();
                 self.depth_in = beam.depth_in.to_string();
-                self.selected_species = Some(beam.material.species);
-                self.selected_grade = Some(beam.material.grade);
+
+                // Extract material-specific fields
+                match &beam.material {
+                    Material::SawnLumber(wood) => {
+                        self.selected_material_type = MaterialType::SawnLumber;
+                        self.selected_species = Some(wood.species);
+                        self.selected_grade = Some(wood.grade);
+                    }
+                    Material::Glulam(glulam) => {
+                        self.selected_material_type = MaterialType::Glulam;
+                        self.selected_glulam_class = Some(glulam.stress_class);
+                        self.selected_glulam_layup = Some(glulam.layup);
+                    }
+                    Material::Lvl(lvl) => {
+                        self.selected_material_type = MaterialType::Lvl;
+                        self.selected_lvl_grade = Some(lvl.grade);
+                    }
+                    Material::Psl(psl) => {
+                        self.selected_material_type = MaterialType::Psl;
+                        self.selected_psl_grade = Some(psl.grade);
+                    }
+                }
+
                 self.result = None;
                 self.error_message = None;
                 self.status = format!("Selected: {}", beam.label);
@@ -492,8 +586,13 @@ impl App {
         self.load_plf = "150.0".to_string();
         self.width_in = "1.5".to_string();
         self.depth_in = "9.25".to_string();
+        self.selected_material_type = MaterialType::SawnLumber;
         self.selected_species = Some(WoodSpecies::DouglasFirLarch);
         self.selected_grade = Some(WoodGrade::No2);
+        self.selected_glulam_class = Some(GlulamStressClass::F24_V4);
+        self.selected_glulam_layup = Some(GlulamLayup::Unbalanced);
+        self.selected_lvl_grade = Some(LvlGrade::Standard);
+        self.selected_psl_grade = Some(PslGrade::Standard);
     }
 
     fn add_or_update_beam(&mut self) {
@@ -531,18 +630,62 @@ impl App {
                 return;
             }
         };
-        let species = match self.selected_species {
-            Some(s) => s,
-            None => {
-                self.error_message = Some("Please select a wood species".to_string());
-                return;
+
+        // Build material based on selected type
+        let material = match self.selected_material_type {
+            MaterialType::SawnLumber => {
+                let species = match self.selected_species {
+                    Some(s) => s,
+                    None => {
+                        self.error_message = Some("Please select a wood species".to_string());
+                        return;
+                    }
+                };
+                let grade = match self.selected_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select a wood grade".to_string());
+                        return;
+                    }
+                };
+                Material::SawnLumber(WoodMaterial::new(species, grade))
             }
-        };
-        let grade = match self.selected_grade {
-            Some(g) => g,
-            None => {
-                self.error_message = Some("Please select a wood grade".to_string());
-                return;
+            MaterialType::Glulam => {
+                let stress_class = match self.selected_glulam_class {
+                    Some(c) => c,
+                    None => {
+                        self.error_message = Some("Please select a glulam stress class".to_string());
+                        return;
+                    }
+                };
+                let layup = match self.selected_glulam_layup {
+                    Some(l) => l,
+                    None => {
+                        self.error_message = Some("Please select a glulam layup".to_string());
+                        return;
+                    }
+                };
+                Material::Glulam(GlulamMaterial::new(stress_class, layup))
+            }
+            MaterialType::Lvl => {
+                let grade = match self.selected_lvl_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select an LVL grade".to_string());
+                        return;
+                    }
+                };
+                Material::Lvl(LvlMaterial::new(grade))
+            }
+            MaterialType::Psl => {
+                let grade = match self.selected_psl_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select a PSL grade".to_string());
+                        return;
+                    }
+                };
+                Material::Psl(PslMaterial::new(grade))
             }
         };
 
@@ -550,7 +693,7 @@ impl App {
             label: self.beam_label.clone(),
             span_ft,
             uniform_load_plf: load_plf,
-            material: WoodMaterial::new(species, grade),
+            material,
             width_in,
             depth_in,
         };
@@ -624,19 +767,61 @@ impl App {
             }
         };
 
-        let species = match self.selected_species {
-            Some(s) => s,
-            None => {
-                self.error_message = Some("Please select a wood species".to_string());
-                return;
+        // Build material based on selected type
+        let material = match self.selected_material_type {
+            MaterialType::SawnLumber => {
+                let species = match self.selected_species {
+                    Some(s) => s,
+                    None => {
+                        self.error_message = Some("Please select a wood species".to_string());
+                        return;
+                    }
+                };
+                let grade = match self.selected_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select a wood grade".to_string());
+                        return;
+                    }
+                };
+                Material::SawnLumber(WoodMaterial::new(species, grade))
             }
-        };
-
-        let grade = match self.selected_grade {
-            Some(g) => g,
-            None => {
-                self.error_message = Some("Please select a wood grade".to_string());
-                return;
+            MaterialType::Glulam => {
+                let stress_class = match self.selected_glulam_class {
+                    Some(c) => c,
+                    None => {
+                        self.error_message = Some("Please select a glulam stress class".to_string());
+                        return;
+                    }
+                };
+                let layup = match self.selected_glulam_layup {
+                    Some(l) => l,
+                    None => {
+                        self.error_message = Some("Please select a glulam layup".to_string());
+                        return;
+                    }
+                };
+                Material::Glulam(GlulamMaterial::new(stress_class, layup))
+            }
+            MaterialType::Lvl => {
+                let grade = match self.selected_lvl_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select an LVL grade".to_string());
+                        return;
+                    }
+                };
+                Material::Lvl(LvlMaterial::new(grade))
+            }
+            MaterialType::Psl => {
+                let grade = match self.selected_psl_grade {
+                    Some(g) => g,
+                    None => {
+                        self.error_message = Some("Please select a PSL grade".to_string());
+                        return;
+                    }
+                };
+                Material::Psl(PslMaterial::new(grade))
             }
         };
 
@@ -645,7 +830,7 @@ impl App {
             label: self.beam_label.clone(),
             span_ft,
             uniform_load_plf: load_plf,
-            material: WoodMaterial::new(species, grade),
+            material,
             width_in,
             depth_in,
         };
@@ -872,26 +1057,84 @@ impl App {
         ]
         .spacing(6);
 
+        // Build material-specific options based on selected type
+        let material_options: Column<'_, Message> = match self.selected_material_type {
+            MaterialType::SawnLumber => column![
+                text("Species:").size(11),
+                pick_list(
+                    &WoodSpecies::ALL[..],
+                    self.selected_species,
+                    Message::SpeciesSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+                vertical_space().height(4),
+                text("Grade:").size(11),
+                pick_list(
+                    &WoodGrade::ALL[..],
+                    self.selected_grade,
+                    Message::GradeSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+            ]
+            .spacing(2),
+            MaterialType::Glulam => column![
+                text("Stress Class:").size(11),
+                pick_list(
+                    &GlulamStressClass::ALL[..],
+                    self.selected_glulam_class,
+                    Message::GlulamClassSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+                vertical_space().height(4),
+                text("Layup:").size(11),
+                pick_list(
+                    &GlulamLayup::ALL[..],
+                    self.selected_glulam_layup,
+                    Message::GlulamLayupSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+            ]
+            .spacing(2),
+            MaterialType::Lvl => column![
+                text("Grade:").size(11),
+                pick_list(
+                    &LvlGrade::ALL[..],
+                    self.selected_lvl_grade,
+                    Message::LvlGradeSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+            ]
+            .spacing(2),
+            MaterialType::Psl => column![
+                text("Grade:").size(11),
+                pick_list(
+                    &PslGrade::ALL[..],
+                    self.selected_psl_grade,
+                    Message::PslGradeSelected
+                )
+                .width(Length::Fill)
+                .placeholder("Select..."),
+            ]
+            .spacing(2),
+        };
+
         let material_section = column![
             text("Material").size(14),
             vertical_space().height(8),
-            text("Species:").size(11),
+            text("Type:").size(11),
             pick_list(
-                &WoodSpecies::ALL[..],
-                self.selected_species,
-                Message::SpeciesSelected
+                &MaterialType::ALL[..],
+                Some(self.selected_material_type),
+                Message::MaterialTypeSelected
             )
-            .width(Length::Fill)
-            .placeholder("Select..."),
-            vertical_space().height(4),
-            text("Grade:").size(11),
-            pick_list(
-                &WoodGrade::ALL[..],
-                self.selected_grade,
-                Message::GradeSelected
-            )
-            .width(Length::Fill)
-            .placeholder("Select..."),
+            .width(Length::Fill),
+            vertical_space().height(8),
+            material_options,
         ]
         .spacing(2);
 
