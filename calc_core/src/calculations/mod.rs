@@ -17,13 +17,16 @@
 //! ## Available Calculations
 //!
 //! - [`beam`] - Simply-supported beam analysis (wood)
+//! - [`column`] - Axial compression member analysis (wood)
 
 pub mod beam;
+pub mod column;
 
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
 pub use beam::{BeamInput, BeamResult};
+pub use column::{ColumnInput, ColumnResult};
 
 /// Enum wrapper for all calculation types.
 ///
@@ -34,7 +37,8 @@ pub use beam::{BeamInput, BeamResult};
 pub enum CalculationItem {
     /// Simply-supported beam calculation
     Beam(BeamInput),
-    // Future: Column(ColumnInput),
+    /// Axial compression column calculation
+    Column(ColumnInput),
     // Future: ShearWall(ShearWallInput),
     // etc.
 }
@@ -44,6 +48,7 @@ impl CalculationItem {
     pub fn label(&self) -> &str {
         match self {
             CalculationItem::Beam(b) => &b.label,
+            CalculationItem::Column(c) => &c.label,
         }
     }
 
@@ -51,6 +56,7 @@ impl CalculationItem {
     pub fn calc_type(&self) -> &'static str {
         match self {
             CalculationItem::Beam(_) => "Beam",
+            CalculationItem::Column(_) => "Column",
         }
     }
 }
