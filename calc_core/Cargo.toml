@@ -12,12 +12,15 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-fs2 = { workspace = true }
 typst = { workspace = true }
 typst-pdf = { workspace = true }
 typst-assets = { workspace = true }
 comemo = "0.4"
 ecow = "0.2"
+
+# fs2 only on native targets (not WASM)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fs2 = { workspace = true }
 
 [dev-dependencies]
 # For testing

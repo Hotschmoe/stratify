@@ -2,13 +2,18 @@
 //!
 //! Handles project file operations with safety features:
 //! - **Atomic saves**: Write to .tmp, verify, rename to prevent corruption
-//! - **File locking**: Prevent concurrent edits on shared drives
+//! - **File locking**: Prevent concurrent edits on shared drives (native only)
 //! - **Version validation**: Ensure schema compatibility
 //!
 //! ## File Format
 //!
 //! Projects are saved as `.stf` (Stratify) files containing JSON.
 //! Lock files use `.stf.lock` extension with metadata about who holds the lock.
+//!
+//! ## Platform Notes
+//!
+//! File locking is only available on native platforms (Windows, macOS, Linux).
+//! On WebAssembly, file operations work but locking is not available.
 //!
 //! ## Example
 //!
@@ -20,7 +25,7 @@
 //! let project = Project::new("Engineer", "25-001", "Client");
 //! let path = Path::new("myproject.stf");
 //!
-//! // Acquire lock before saving
+//! // Acquire lock before saving (native only)
 //! let lock = FileLock::acquire(path, "engineer@company.com").unwrap();
 //!
 //! // Save with atomic write
@@ -30,16 +35,21 @@
 //! drop(lock);
 //! ```
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{CalcError, CalcResult};
 use crate::project::{Project, SCHEMA_VERSION};
+
+// fs2 is only available on native platforms
+#[cfg(not(target_arch = "wasm32"))]
+use fs2::FileExt;
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::OpenOptions;
 
 /// Lock file metadata stored in .stf.lock files
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +66,7 @@ pub struct LockInfo {
 
 impl LockInfo {
     /// Create new lock info for the current process
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(user_id: impl Into<String>) -> Self {
         LockInfo {
             user_id: user_id.into(),
@@ -64,9 +75,21 @@ impl LockInfo {
             locked_at: Utc::now(),
         }
     }
+
+    /// Create new lock info (WASM stub)
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(user_id: impl Into<String>) -> Self {
+        LockInfo {
+            user_id: user_id.into(),
+            machine: "wasm".to_string(),
+            pid: 0,
+            locked_at: Utc::now(),
+        }
+    }
 }
 
 /// Get the hostname of the current machine
+#[cfg(not(target_arch = "wasm32"))]
 fn hostname() -> Option<String> {
     #[cfg(windows)]
     {
@@ -80,11 +103,19 @@ fn hostname() -> Option<String> {
     }
 }
 
+// ============================================================================
+// File Locking (Native only)
+// ============================================================================
+
 /// File lock guard that releases the lock when dropped.
 ///
 /// Uses both:
 /// 1. OS-level file locking (via fs2) for process safety
 /// 2. .lock file with metadata for user visibility
+///
+/// **Note**: File locking is only available on native platforms.
+/// On WASM, `acquire()` will return an error.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct FileLock {
     /// Path to the main project file
     project_path: PathBuf,
@@ -96,6 +127,7 @@ pub struct FileLock {
     pub info: LockInfo,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FileLock {
     /// Acquire an exclusive lock on a project file.
     ///
@@ -203,6 +235,7 @@ impl FileLock {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for FileLock {
     fn drop(&mut self) {
         // Remove the lock file
@@ -211,7 +244,42 @@ impl Drop for FileLock {
     }
 }
 
+// ============================================================================
+// File Locking Stubs (WASM)
+// ============================================================================
+
+/// File lock stub for WASM (locking not supported)
+#[cfg(target_arch = "wasm32")]
+pub struct FileLock {
+    /// Lock metadata
+    pub info: LockInfo,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl FileLock {
+    /// File locking is not available on WASM.
+    ///
+    /// This always returns an error indicating that locking is unsupported.
+    pub fn acquire(_path: &Path, _user_id: impl Into<String>) -> CalcResult<Self> {
+        Err(CalcError::file_error(
+            "acquire lock",
+            "N/A".to_string(),
+            "File locking is not available in WebAssembly".to_string(),
+        ))
+    }
+
+    /// Always returns None on WASM (no file locking support)
+    pub fn check(_path: &Path) -> Option<LockInfo> {
+        None
+    }
+}
+
+// ============================================================================
+// Helper Functions (Native only)
+// ============================================================================
+
 /// Get the lock file path for a project file
+#[cfg(not(target_arch = "wasm32"))]
 fn lock_path_for(project_path: &Path) -> PathBuf {
     let mut lock_path = project_path.to_path_buf();
     let extension = lock_path
@@ -223,6 +291,7 @@ fn lock_path_for(project_path: &Path) -> PathBuf {
 }
 
 /// Read lock info from a lock file
+#[cfg(not(target_arch = "wasm32"))]
 fn read_lock_info(lock_path: &Path) -> CalcResult<LockInfo> {
     let mut file = File::open(lock_path).map_err(|e| {
         CalcError::file_error("read lock", lock_path.display().to_string(), e.to_string())
@@ -239,6 +308,7 @@ fn read_lock_info(lock_path: &Path) -> CalcResult<LockInfo> {
 }
 
 /// Check if a lock is stale (the process that created it is no longer running)
+#[cfg(not(target_arch = "wasm32"))]
 fn is_lock_stale(info: &LockInfo) -> bool {
     // Check if it's our machine
     if let Some(our_machine) = hostname() {
@@ -262,7 +332,6 @@ fn is_lock_stale(info: &LockInfo) -> bool {
             #[cfg(unix)]
             {
                 // On Unix, check /proc or use kill(0)
-                use std::fs;
                 if !fs::metadata(format!("/proc/{}", info.pid)).is_ok() {
                     return true;
                 }
@@ -278,6 +347,10 @@ fn is_lock_stale(info: &LockInfo) -> bool {
 
     false
 }
+
+// ============================================================================
+// Save/Load (Cross-platform)
+// ============================================================================
 
 /// Save a project to a file with atomic write semantics.
 ///
@@ -438,7 +511,12 @@ fn validate_version(file_version: &str) -> CalcResult<()> {
     Ok(())
 }
 
+// ============================================================================
+// Tests (Native only - require filesystem)
+// ============================================================================
+
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod tests {
     use super::*;
     use std::env::temp_dir;

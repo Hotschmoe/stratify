@@ -651,6 +651,7 @@ impl App {
         self.status = "New project created".to_string();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn open_project(&mut self) {
         // Show file dialog
         if let Some(path) = rfd::FileDialog::new()
@@ -710,6 +711,11 @@ impl App {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn open_project(&mut self) {
+        self.status = "File open not available in browser. Use drag-and-drop.".to_string();
+    }
+
     fn save_project(&mut self) {
         if !self.can_edit() {
             self.status = "Cannot save: file is read-only".to_string();
@@ -723,6 +729,7 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_project_as(&mut self) {
         if !self.can_edit() {
             self.status = "Cannot save: file is read-only".to_string();
@@ -748,6 +755,11 @@ impl App {
             }
             self.do_save(path);
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_project_as(&mut self) {
+        self.status = "File save not available in browser.".to_string();
     }
 
     fn do_save(&mut self, path: PathBuf) {
@@ -1120,6 +1132,7 @@ impl App {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn export_pdf(&mut self) {
         if self.project.items.is_empty() {
             self.status = "No beams in project to export".to_string();
@@ -1165,6 +1178,11 @@ impl App {
                 self.status = format!("PDF generation failed: {}", e);
             }
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn export_pdf(&mut self) {
+        self.status = "PDF export not available in browser.".to_string();
     }
 }
 
