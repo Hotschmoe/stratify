@@ -390,10 +390,10 @@ See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
 
 ## Future Features / TODO
 
-### High Priority (MVP Blockers)
+### High Priority (Next Steps)
 
-- [ ] PDF generation with Typst templates
-- [ ] Basic GUI with Iced framework
+- [x] ~~PDF generation with Typst templates~~ ✅ DONE
+- [ ] Basic GUI with Iced framework ← **NEXT PRIORITY**
 - [ ] Steel section database (common W-shapes)
 - [ ] Concrete material properties
 
