@@ -140,12 +140,17 @@ impl Project {
     }
 
     /// Get a mutable reference to a calculation item by UUID.
+    ///
+    /// Note: This method updates the modified timestamp when an item is found.
+    /// The caller should be aware that getting a mutable reference marks
+    /// the project as modified.
     pub fn get_item_mut(&mut self, id: &Uuid) -> Option<&mut CalculationItem> {
-        let item = self.items.get_mut(id);
-        if item.is_some() {
-            self.touch();
+        if self.items.contains_key(id) {
+            self.meta.modified = Utc::now();
+            self.items.get_mut(id)
+        } else {
+            None
         }
-        item
     }
 
     /// Update the modified timestamp.

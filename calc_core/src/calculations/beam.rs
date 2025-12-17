@@ -492,7 +492,7 @@ mod tests {
         // Should contain key fields
         assert!(json.contains("max_moment_ftlb"));
         assert!(json.contains("bending_unity"));
-        assert!(json.contains("passes")); // Well, this won't be there since it's a method
+        assert!(json.contains("shear_unity"));
 
         let roundtrip: BeamResult = serde_json::from_str(&json).unwrap();
         assert!((result.max_moment_ftlb - roundtrip.max_moment_ftlb).abs() < 0.001);
