@@ -1328,6 +1328,72 @@ impl BeamDiagram {
             ..Text::default()
         };
         frame.fill_text(span_text);
+
+        // Reaction arrows (upward) at supports
+        let reaction_color = Color::from_rgb(0.7, 0.2, 0.2); // Red for reactions
+        let reaction_arrow_length = height * 0.2;
+        let reaction_start_y = beam_y + support_size + 5.0;
+
+        // Left reaction arrow (upward)
+        let left_reaction = Path::line(
+            Point::new(x, reaction_start_y + reaction_arrow_length),
+            Point::new(x, reaction_start_y),
+        );
+        frame.stroke(
+            &left_reaction,
+            Stroke::default().with_color(reaction_color).with_width(2.5),
+        );
+        // Arrow head pointing up
+        let left_head = Path::new(|builder| {
+            builder.move_to(Point::new(x, reaction_start_y));
+            builder.line_to(Point::new(x - 4.0, reaction_start_y + 8.0));
+            builder.move_to(Point::new(x, reaction_start_y));
+            builder.line_to(Point::new(x + 4.0, reaction_start_y + 8.0));
+        });
+        frame.stroke(
+            &left_head,
+            Stroke::default().with_color(reaction_color).with_width(2.5),
+        );
+
+        // Right reaction arrow (upward)
+        let right_reaction = Path::line(
+            Point::new(x + width, reaction_start_y + reaction_arrow_length),
+            Point::new(x + width, reaction_start_y),
+        );
+        frame.stroke(
+            &right_reaction,
+            Stroke::default().with_color(reaction_color).with_width(2.5),
+        );
+        // Arrow head pointing up
+        let right_head = Path::new(|builder| {
+            builder.move_to(Point::new(x + width, reaction_start_y));
+            builder.line_to(Point::new(x + width - 4.0, reaction_start_y + 8.0));
+            builder.move_to(Point::new(x + width, reaction_start_y));
+            builder.line_to(Point::new(x + width + 4.0, reaction_start_y + 8.0));
+        });
+        frame.stroke(
+            &right_head,
+            Stroke::default().with_color(reaction_color).with_width(2.5),
+        );
+
+        // Reaction labels (R = wL/2 = max_shear)
+        let left_reaction_text = Text {
+            content: format!("R = {:.0} lb", self.data.max_shear_lb),
+            position: Point::new(x + 5.0, reaction_start_y + reaction_arrow_length + 2.0),
+            color: reaction_color,
+            size: iced::Pixels(9.0),
+            ..Text::default()
+        };
+        frame.fill_text(left_reaction_text);
+
+        let right_reaction_text = Text {
+            content: format!("R = {:.0} lb", self.data.max_shear_lb),
+            position: Point::new(x + width - 55.0, reaction_start_y + reaction_arrow_length + 2.0),
+            color: reaction_color,
+            size: iced::Pixels(9.0),
+            ..Text::default()
+        };
+        frame.fill_text(right_reaction_text);
     }
 
     fn draw_shear_diagram(
