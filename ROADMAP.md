@@ -4,16 +4,18 @@ This document outlines the phased development approach for Stratify, from initia
 
 ## Current Status
 
-**GUI FOUNDATION COMPLETE!** ✓ (as of 2025-12-17)
+**FILE OPERATIONS COMPLETE!** ✓ (as of 2025-12-17)
 
-The core input → calculation → PDF pipeline is functional with a GUI:
+Full project file management is now integrated into the GUI:
 - ✅ Beam input parameters (GUI form)
 - ✅ NDS calculations (moment, shear, deflection, unity checks)
-- ✅ Professional PDF report generation with Typst
+- ✅ Professional PDF report generation with Typst + BerkeleyMono font
 - ✅ Project file save/load with atomic writes and file locking
-- ✅ Iced 0.13 GUI with input form, material dropdowns, and PDF export
+- ✅ Iced 0.13 GUI with toolbar (New, Open, Save, Save As)
+- ✅ Read-only mode for locked files with status display
+- ✅ Project summary showing all calculation items
 
-**Next Priority**: Diagram rendering, file operations integration, and Project Explorer sidebar
+**Next Priority**: Diagram rendering (shear/moment/deflection plots) or Phase 3 engineering calculations
 
 ---
 
@@ -173,18 +175,21 @@ The core input → calculation → PDF pipeline is functional with a GUI:
   - [x] Implement basic styling (bordered panels, color-coded status)
   - [x] Add file dialog for PDF export (rfd crate)
 
-### Week 8: Graphics Rendering 🔲 NOT STARTED
+### Week 8: Graphics Rendering & File Operations ⚠️ PARTIAL
 
-- [ ] **GUI: Diagram Rendering**
+- [ ] **GUI: Diagram Rendering** - *not yet*
   - [ ] Create custom canvas for beam diagrams
   - [ ] Implement shear diagram rendering
   - [ ] Implement moment diagram rendering
   - [ ] Implement deflection diagram rendering
 
-- [ ] **GUI: File Operations**
-  - [ ] Implement file menu (New, Open, Save, Save As, Export PDF)
-  - [ ] Integrate with `calc_core` file I/O functions
-  - [ ] Display lock status in status bar
+- [x] **GUI: File Operations** ✅ COMPLETE
+  - [x] Implement toolbar with New, Open, Save, Save As buttons
+  - [x] Integrate with `calc_core` file I/O functions (load_project, save_project)
+  - [x] Display lock status in status bar
+  - [x] Read-only mode for locked files
+  - [x] Modified indicator (* in title/status)
+  - [x] Project summary view showing items
 
 ## Phase 3: Engineering Library (Months 3-6)
 
