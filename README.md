@@ -76,7 +76,7 @@ This architecture enables future integration as an MCP server, giving AI assista
 
 ### Core Dependencies
 
-- **Language**: Rust (Edition 2024)
+- **Language**: Rust (Edition 2021)
 - **Serialization**: `serde`, `serde_json` - Industry standard for JSON handling
 - **File Locking**: `fs2` - Cross-platform file locking for network drives
 - **UUID Generation**: `uuid` - Unique identifiers for calculation items
@@ -217,28 +217,63 @@ This eliminates "mystery changes" where a load was accidentally deleted or a par
 
 ## Material Databases
 
+### Current Status (MVP)
+
+The MVP uses hardcoded placeholder values for common materials. This is sufficient for demonstrating the input→calculation→PDF pipeline. Full database integration is planned for post-MVP.
+
 ### Wood Species
 
-- **Sawn Lumber**: DF-L, SP, HF, etc.
-- **Grades**: Select Structural, No.1, No.2, No.3, Stud, etc.
-- **Engineered**: Glulam, LVL, PSL
+- **Sawn Lumber**: DF-L, SP, HF, SPF, DF-S (NDS 2018 Table 4A values)
+- **Grades**: Select Structural, No.1, No.2, No.3, Stud, Construction, Standard, Utility
+- **Engineered**: Glulam, LVL, PSL (planned)
 - **NDS Adjustment Factors**: C_D, C_M, C_t, C_F, C_r, etc.
 
 ### Steel Specifications
 
-- **Materials**: A992, A36, A500, A572, etc.
-- **Section Properties**: W-shapes, HSS, Channels, Angles, etc.
+- **Materials**: A992, A36, A500, A572, etc. (planned)
+- **Section Properties**: W-shapes, HSS, Channels, Angles, etc. (planned)
 - **AISC 360**: Unity checks, slenderness ratios, etc.
 
 ### Concrete
 
-- **Compressive Strengths**: f'c definitions (2500, 3000, 4000, 5000+ psi)
-- **Rebar Sizes**: #3 through #18, standard grades
+- **Compressive Strengths**: f'c definitions (2500, 3000, 4000, 5000+ psi) (planned)
+- **Rebar Sizes**: #3 through #18, standard grades (planned)
 
 ### Catalogs
 
-- **Simpson Strong-Tie**: Hangers, hold-downs, portal frames, connectors
+- **Simpson Strong-Tie**: Hangers, hold-downs, portal frames, connectors (planned)
 - **Format**: XML/CSV import for attachment options
+
+### Future: Official Database Sources
+
+**Goal**: Acquire official, licensed material databases for production use. The underlying data is industry-standard and publicly documented (though not always freely available in digital form).
+
+#### Target Data Sources
+
+| Source | Data | Format | Notes |
+|--------|------|--------|-------|
+| **AISC** | Steel shapes (W, HSS, C, L, etc.) | CSV/Database | Official shapes database available for purchase |
+| **AWC/NDS** | Wood design values | PDF/Tables | NDS Supplement contains all reference values |
+| **ACI** | Concrete/rebar properties | Standards docs | Values derived from ACI 318 |
+| **Simpson Strong-Tie** | Connector capacities | XML/CSV | May provide official digital catalog |
+| **USP Structural** | Connector capacities | TBD | Alternative connector manufacturer |
+| **MiTek** | Connector capacities | TBD | Alternative connector manufacturer |
+
+#### Implementation Strategy
+
+1. **MVP Phase**: Hardcoded values for common materials (current)
+2. **Beta Phase**: CSV/JSON files with manually transcribed values
+3. **Production Phase**:
+   - Contact manufacturers for official digital catalogs
+   - Purchase AISC shapes database license
+   - Implement automatic catalog update mechanism
+   - Build tooling to convert official formats to our internal schema
+
+#### Technical Notes
+
+- **ENERCALC Observation**: ENERCALC uses `.tbl` binary format for fast lookups. This appears to be their proprietary conversion of industry-standard databases. The underlying data (AISC shapes, NDS values, etc.) is the same publicly documented information.
+- **Build-Time Embedding**: Use `build.rs` or `phf` crate to compile databases into static HashMaps at compile time for zero-runtime file dependencies.
+- **Catalog Updates**: Design system to accept catalog updates without code changes (versioned JSON/CSV files embedded at build time).
 
 ## Calculation Types
 
@@ -284,7 +319,7 @@ PDFs are generated using Typst templates. Templates are defined as Rust string t
 
 ### Prerequisites
 
-- Rust 1.70+ (Edition 2024)
+- Rust 1.70+ (Edition 2021)
 - Cargo
 
 ### Build Native Applications
@@ -352,4 +387,39 @@ This is a private/internal project. For questions or contributions, contact the 
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
+
+## Future Features / TODO
+
+### High Priority (MVP Blockers)
+
+- [ ] PDF generation with Typst templates
+- [ ] Basic GUI with Iced framework
+- [ ] Steel section database (common W-shapes)
+- [ ] Concrete material properties
+
+### Material Database Automation
+
+- [ ] **AISC Shapes Database**: Purchase official license, build import tooling
+- [ ] **Simpson Strong-Tie Catalog**:
+  - [ ] Search for official XML/CSV digital catalog from manufacturer
+  - [ ] If unavailable, manually transcribe common connectors
+  - [ ] Build automatic catalog update mechanism
+- [ ] **AWC/NDS Database**: Automate extraction from NDS Supplement tables
+- [ ] **Catalog Build Pipeline**: Create `build.rs` script to compile CSV/JSON databases into static Rust HashMaps at build time
+
+### Engineering Features
+
+- [ ] Full NDS adjustment factor implementation (C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r, C_P, C_b)
+- [ ] AISC 360 steel beam/column design
+- [ ] ACI 318 concrete design
+- [ ] Load combination generator (ASCE 7 ASD/LRFD)
+- [ ] Continuous beam analysis (moment distribution or stiffness method)
+- [ ] Frame analysis (matrix stiffness method)
+
+### Platform Features
+
+- [ ] WebAssembly deployment
+- [ ] Cloud sync integration (beyond file locking)
+- [ ] CAD interoperability (IFC import/export)
+- [ ] MCP server for LLM integration
 
