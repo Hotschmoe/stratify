@@ -4,18 +4,22 @@ This document outlines the phased development approach for Stratify, from initia
 
 ## Current Status
 
-**FILE OPERATIONS COMPLETE!** ✓ (as of 2025-12-17)
+**PHASE 2 COMPLETE!** ✓ (as of 2025-12-17)
 
-Full project file management is now integrated into the GUI:
-- ✅ Beam input parameters (GUI form)
+Full GUI application with graphics, reporting, and file management:
+- ✅ Beam input parameters (GUI form with validation)
 - ✅ NDS calculations (moment, shear, deflection, unity checks)
 - ✅ Professional PDF report generation with Typst + BerkeleyMono font
+- ✅ Multi-beam PDF export (cover page + individual beam pages)
 - ✅ Project file save/load with atomic writes and file locking
-- ✅ Iced 0.13 GUI with toolbar (New, Open, Save, Save As)
+- ✅ Iced 0.13 GUI with toolbar (New, Open, Save, Save As, Export PDF)
 - ✅ Read-only mode for locked files with status display
-- ✅ Project summary showing all calculation items
+- ✅ Beam selection and editing from project item list
+- ✅ Keyboard shortcuts (Ctrl+N/O/S, Ctrl+Shift+S)
+- ✅ **Diagram rendering** - beam schematic, shear, moment, deflection plots
+- ✅ Support reactions displayed (R = wL/2) for post/footing design
 
-**Next Priority**: Diagram rendering (shear/moment/deflection plots) or Phase 3 engineering calculations
+**Next Priority**: Phase 3 engineering calculations (NDS adjustment factors, load combinations)
 
 ---
 
@@ -175,21 +179,26 @@ Full project file management is now integrated into the GUI:
   - [x] Implement basic styling (bordered panels, color-coded status)
   - [x] Add file dialog for PDF export (rfd crate)
 
-### Week 8: Graphics Rendering & File Operations ⚠️ PARTIAL
+### Week 8: Graphics Rendering & File Operations ✅ COMPLETE
 
-- [ ] **GUI: Diagram Rendering** - *not yet*
-  - [ ] Create custom canvas for beam diagrams
-  - [ ] Implement shear diagram rendering
-  - [ ] Implement moment diagram rendering
-  - [ ] Implement deflection diagram rendering
+- [x] **GUI: Diagram Rendering** ✅ COMPLETE
+  - [x] Create custom canvas for beam diagrams (Iced canvas feature)
+  - [x] Implement beam schematic with supports and uniform load arrows
+  - [x] Implement shear diagram rendering (linear V diagram)
+  - [x] Implement moment diagram rendering (parabolic M diagram)
+  - [x] Implement deflection diagram rendering (δ curve)
+  - [x] Display support reactions (R = wL/2) for post/footing design
+  - [x] Color-coded diagrams with labels and max values
 
 - [x] **GUI: File Operations** ✅ COMPLETE
-  - [x] Implement toolbar with New, Open, Save, Save As buttons
+  - [x] Implement toolbar with New, Open, Save, Save As, Export PDF buttons
   - [x] Integrate with `calc_core` file I/O functions (load_project, save_project)
   - [x] Display lock status in status bar
   - [x] Read-only mode for locked files
   - [x] Modified indicator (* in title/status)
   - [x] Project summary view showing items
+  - [x] Beam selection and editing from project list
+  - [x] Keyboard shortcuts (Ctrl+N/O/S, Ctrl+Shift+S)
 
 ## Phase 3: Engineering Library (Months 3-6)
 
@@ -283,12 +292,12 @@ Full project file management is now integrated into the GUI:
 - [ ] Test in browsers (Chrome, Firefox, Safari)
 - [ ] Deploy to web hosting
 
-### Month 8: UI/UX Polish 🔲 NOT STARTED
+### Month 8: UI/UX Polish ⚠️ PARTIAL
 
 - [ ] Dark/Light mode
-- [ ] Keyboard shortcuts
+- [x] Keyboard shortcuts (Ctrl+N/O/S, Ctrl+Shift+S)
 - [ ] Undo/redo
-- [ ] Input validation and error messages
+- [x] Input validation and error messages
 
 - [ ] **Rendering Performance & Smoothness**
   - [ ] Test resize behavior on all platforms (Windows, macOS, Linux, WASM)
