@@ -58,18 +58,44 @@ stratify/
 │   ├── pdf.rs           # Typst-based PDF generation
 │   └── errors.rs        # CalcError enum for structured errors
 ├── calc_gui/            # [BIN] Iced 0.14 GUI application
-│   └── main.rs          # ~2400 lines (see GUI_LAYOUT.md for panel structure)
+│   └── src/
+│       ├── main.rs      # App state, Message enum, update logic (~1500 lines)
+│       └── ui/          # Modular UI components (see GUI_LAYOUT.md)
+│           ├── mod.rs           # Module exports
+│           ├── toolbar.rs       # File operations, settings buttons
+│           ├── items_panel.rs   # Left sidebar: Project Info, Beams list
+│           ├── input_panel.rs   # Center panel dispatcher
+│           ├── input_project_info.rs  # Project info editor
+│           ├── input_wood_beam.rs     # Beam editor (spans, loads, material, NDS factors)
+│           ├── results_panel.rs # Right panel dispatcher
+│           ├── result_project_info.rs # Project summary view
+│           ├── result_wood_beam.rs    # Calculation results + diagrams
+│           ├── status_bar.rs    # Bottom status messages
+│           └── shared/
+│               ├── mod.rs       # Shared component exports
+│               └── diagrams.rs  # Canvas drawing (shear, moment, deflection)
 └── calc_cli/            # [BIN] Placeholder CLI
 ```
 
 ### GUI Panel Structure
 
-See `calc_gui/GUI_LAYOUT.md` for detailed layout. Main panels:
-- **Toolbar**: File operations (New, Open, Save, Export PDF)
-- **Items Panel** (left): Project navigation, beam list with [+] to create
-- **Input Panel** (center): Editor for selected item (beam properties, loads, material, adjustment factors)
-- **Results Panel** (right): Calculation results, diagrams (shear, moment, deflection)
-- **Status Bar**: File path, lock status, messages
+See `calc_gui/GUI_LAYOUT.md` for detailed layout. The GUI uses a modular architecture:
+
+- **main.rs**: App state (App struct), Message enum, update logic, and view orchestration
+- **ui/**: Modular panel components with dispatcher pattern
+  - `toolbar.rs`: File ops (New, Open, Save, Export PDF), theme toggle
+  - `items_panel.rs`: Left sidebar with Project Info and Beams list
+  - `input_panel.rs`: Dispatcher that routes to input_project_info or input_wood_beam
+  - `results_panel.rs`: Dispatcher that routes to result_project_info or result_wood_beam
+  - `status_bar.rs`: File path, lock status, messages
+  - `shared/diagrams.rs`: Canvas drawing for beam schematic and V/M/δ diagrams
+
+**Adding a new item type** (e.g., columns):
+1. Create `input_wood_column.rs` with the editor UI
+2. Create `result_wood_column.rs` with results display
+3. Add `Column` variant to `EditorSelection` in main.rs
+4. Update dispatchers in `input_panel.rs` and `results_panel.rs`
+5. Update `items_panel.rs` to enable the section
 
 ### Key Architectural Principles
 
