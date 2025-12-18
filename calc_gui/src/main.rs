@@ -322,6 +322,7 @@ pub struct App {
 
     // Settings
     pub dark_mode: bool,
+    pub settings_menu_open: bool,
 }
 
 impl Default for App {
@@ -397,6 +398,7 @@ impl Default for App {
             diagram_cache: canvas::Cache::default(),
             status: "Ready - New Project".to_string(),
             dark_mode: false,
+            settings_menu_open: false,
         }
     }
 }
@@ -524,6 +526,7 @@ pub enum Message {
     FocusPrevious,
 
     // Settings
+    ToggleSettingsMenu,
     ToggleDarkMode,
 }
 
@@ -869,8 +872,12 @@ impl App {
             Message::DeleteSelectedBeam => self.delete_selected_beam(),
             Message::ExportPdf => self.export_pdf(),
 
+            Message::ToggleSettingsMenu => {
+                self.settings_menu_open = !self.settings_menu_open;
+            }
             Message::ToggleDarkMode => {
                 self.dark_mode = !self.dark_mode;
+                self.settings_menu_open = false; // Close menu after toggling
                 self.diagram_cache.clear();
             }
         }
@@ -1453,7 +1460,7 @@ impl App {
         let main_content = column![
             header,
             rule::horizontal(2),
-            ui::toolbar::view_toolbar(self.dark_mode),
+            ui::toolbar::view_toolbar(self.dark_mode, self.settings_menu_open),
             rule::horizontal(1),
             Space::new().height(10),
             content,

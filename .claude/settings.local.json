@@ -20,7 +20,9 @@
       "Bash(git restore:*)",
       "Bash(ls -la \"C:\\Users\\hotschmoe\\Documents\\GitHub\\Stratify\\calc_core\\src\\calculations\"\" 2>/dev/null || ls -la \"C:UsershotschmoeDocumentsGitHubStratifycalc_coresrc\"\")",
       "Bash(trunk:*)",
-      "Bash(cargo install:*)"
+      "Bash(cargo install:*)",
+      "Bash(dir \"C:\\\\Users\\\\hotschmoe\\\\Documents\\\\GitHub\\\\Stratify\\\\calc_gui\\\\src\")",
+      "Bash(mkdir:*)"
     ]
   }
 }
