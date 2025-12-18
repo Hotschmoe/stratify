@@ -2132,47 +2132,29 @@ fn labeled_input<'a>(
 /// Data needed to draw beam diagrams
 struct BeamDiagramData {
     span_ft: f64,
+    #[allow(dead_code)]
     load_plf: f64,
     max_shear_lb: f64,
     max_moment_ftlb: f64,
     max_deflection_in: f64,
+    // Pre-computed diagram points from analysis
+    shear_diagram: Vec<(f64, f64)>,
+    moment_diagram: Vec<(f64, f64)>,
+    deflection_diagram: Vec<(f64, f64)>,
 }
 
 impl BeamDiagramData {
     fn from_calc(input: &BeamInput, result: &BeamResult) -> Self {
         Self {
             span_ft: input.span_ft,
-            load_plf: result.design_load_plf, // Use the factored design load from result
+            load_plf: result.design_load_plf,
             max_shear_lb: result.max_shear_lb,
             max_moment_ftlb: result.max_moment_ftlb,
             max_deflection_in: result.max_deflection_in,
+            shear_diagram: result.shear_diagram.clone(),
+            moment_diagram: result.moment_diagram.clone(),
+            deflection_diagram: result.deflection_diagram.clone(),
         }
-    }
-
-    /// Shear at position x (0 to L): V(x) = w(L/2 - x)
-    #[allow(dead_code)]
-    fn shear_at(&self, x_ratio: f64) -> f64 {
-        let x = x_ratio * self.span_ft;
-        self.load_plf * (self.span_ft / 2.0 - x)
-    }
-
-    /// Moment at position x (0 to L): M(x) = w*x*(L-x)/2
-    fn moment_at(&self, x_ratio: f64) -> f64 {
-        let x = x_ratio * self.span_ft;
-        self.load_plf * x * (self.span_ft - x) / 2.0
-    }
-
-    /// Deflection ratio at position x (normalized 0-1, max at center)
-    /// δ(x) = wx(L³ - 2Lx² + x³)/(24EI) - simplified to shape
-    fn deflection_ratio_at(&self, x_ratio: f64) -> f64 {
-        // Normalized deflection shape for uniform load: x(1-x)(1+x-x²)
-        // Simplified: use polynomial that peaks at center
-        let x = x_ratio;
-        // Shape: 16x(1-x)(1-x+x) normalized to peak=1 at x=0.5
-        // Actual shape: x - 2x³ + x⁴ normalized
-        let shape = x * (1.0 - x) * (1.0 + x - x * x);
-        // Normalize so max = 1 (occurs at x=0.5)
-        shape / 0.3125 // 0.5 * 0.5 * 1.25 = 0.3125
     }
 }
 
@@ -2424,21 +2406,55 @@ impl BeamDiagram {
         );
         frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
 
-        // Shear diagram: linear from +V to -V
-        let shear_path = Path::new(|builder| {
-            builder.move_to(Point::new(x, center_y - plot_height));
-            builder.line_to(Point::new(x + width, center_y + plot_height));
-            builder.line_to(Point::new(x + width, center_y));
-            builder.line_to(Point::new(x, center_y));
-            builder.close();
-        });
-        frame.fill(&shear_path, Color { a: 0.3, ..color });
+        // Draw shear diagram using pre-computed points
+        if !self.data.shear_diagram.is_empty() && self.data.max_shear_lb.abs() > 1e-6 {
+            // Find min/max shear for scaling
+            let max_v = self.data.shear_diagram.iter()
+                .map(|(_, v)| v.abs())
+                .fold(0.0f64, |a, b| a.max(b));
 
-        let shear_line = Path::line(
-            Point::new(x, center_y - plot_height),
-            Point::new(x + width, center_y + plot_height),
-        );
-        frame.stroke(&shear_line, Stroke::default().with_color(color).with_width(2.0));
+            if max_v > 1e-6 {
+                // Draw filled area
+                let shear_path = Path::new(|builder| {
+                    let first = &self.data.shear_diagram[0];
+                    let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                    let v_norm = first.1 / max_v;
+                    let py = center_y - (v_norm as f32) * plot_height;
+                    builder.move_to(Point::new(px, center_y));
+                    builder.line_to(Point::new(px, py));
+
+                    for (pos, v) in &self.data.shear_diagram {
+                        let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                        let v_norm = v / max_v;
+                        let py = center_y - (v_norm as f32) * plot_height;
+                        builder.line_to(Point::new(px, py));
+                    }
+
+                    let last = self.data.shear_diagram.last().unwrap();
+                    let px = x + (last.0 as f32 / self.data.span_ft as f32) * width;
+                    builder.line_to(Point::new(px, center_y));
+                    builder.close();
+                });
+                frame.fill(&shear_path, Color { a: 0.3, ..color });
+
+                // Draw line
+                let shear_line = Path::new(|builder| {
+                    let first = &self.data.shear_diagram[0];
+                    let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                    let v_norm = first.1 / max_v;
+                    let py = center_y - (v_norm as f32) * plot_height;
+                    builder.move_to(Point::new(px, py));
+
+                    for (pos, v) in &self.data.shear_diagram {
+                        let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                        let v_norm = v / max_v;
+                        let py = center_y - (v_norm as f32) * plot_height;
+                        builder.line_to(Point::new(px, py));
+                    }
+                });
+                frame.stroke(&shear_line, Stroke::default().with_color(color).with_width(2.0));
+            }
+        }
 
         // Labels
         let title = Text {
@@ -2489,43 +2505,41 @@ impl BeamDiagram {
         );
         frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
 
-        // Moment diagram: parabola (positive moment = sag below axis in convention)
-        let num_points = 50;
-        let moment_path = Path::new(|builder| {
-            builder.move_to(Point::new(x, axis_y));
-            for i in 0..=num_points {
-                let t = i as f64 / num_points as f64;
-                let m_ratio = self.data.moment_at(t) / self.data.max_moment_ftlb;
-                let px = x + (t as f32) * width;
-                let py = axis_y + (m_ratio as f32) * plot_height;
-                if i == 0 {
-                    builder.move_to(Point::new(px, py));
-                } else {
-                    builder.line_to(Point::new(px, py));
-                }
-            }
-            // Close back to axis
-            builder.line_to(Point::new(x + width, axis_y));
-            builder.line_to(Point::new(x, axis_y));
-            builder.close();
-        });
-        frame.fill(&moment_path, Color { a: 0.3, ..color });
+        // Draw moment diagram using pre-computed points
+        if !self.data.moment_diagram.is_empty() && self.data.max_moment_ftlb.abs() > 1e-6 {
+            let max_m = self.data.max_moment_ftlb;
 
-        // Parabola outline
-        let outline = Path::new(|builder| {
-            for i in 0..=num_points {
-                let t = i as f64 / num_points as f64;
-                let m_ratio = self.data.moment_at(t) / self.data.max_moment_ftlb;
-                let px = x + (t as f32) * width;
-                let py = axis_y + (m_ratio as f32) * plot_height;
-                if i == 0 {
-                    builder.move_to(Point::new(px, py));
-                } else {
+            // Draw filled area
+            let moment_path = Path::new(|builder| {
+                builder.move_to(Point::new(x, axis_y));
+                for (pos, m) in &self.data.moment_diagram {
+                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let m_ratio = m / max_m;
+                    let py = axis_y + (m_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
                 }
-            }
-        });
-        frame.stroke(&outline, Stroke::default().with_color(color).with_width(2.0));
+                builder.line_to(Point::new(x + width, axis_y));
+                builder.close();
+            });
+            frame.fill(&moment_path, Color { a: 0.3, ..color });
+
+            // Draw outline
+            let outline = Path::new(|builder| {
+                let first = &self.data.moment_diagram[0];
+                let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                let m_ratio = first.1 / max_m;
+                let py = axis_y + (m_ratio as f32) * plot_height;
+                builder.move_to(Point::new(px, py));
+
+                for (pos, m) in &self.data.moment_diagram {
+                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let m_ratio = m / max_m;
+                    let py = axis_y + (m_ratio as f32) * plot_height;
+                    builder.line_to(Point::new(px, py));
+                }
+            });
+            frame.stroke(&outline, Stroke::default().with_color(color).with_width(2.0));
+        }
 
         // Labels
         let title = Text {
@@ -2568,37 +2582,41 @@ impl BeamDiagram {
         );
         frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
 
-        // Deflection curve
-        let num_points = 50;
-        let defl_path = Path::new(|builder| {
-            for i in 0..=num_points {
-                let t = i as f64 / num_points as f64;
-                let d_ratio = self.data.deflection_ratio_at(t);
-                let px = x + (t as f32) * width;
+        // Draw deflection using pre-computed points
+        if !self.data.deflection_diagram.is_empty() && self.data.max_deflection_in.abs() > 1e-9 {
+            let max_d = self.data.max_deflection_in;
+
+            // Draw curve
+            let defl_path = Path::new(|builder| {
+                let first = &self.data.deflection_diagram[0];
+                let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                let d_ratio = first.1 / max_d;
                 let py = axis_y + (d_ratio as f32) * plot_height;
-                if i == 0 {
-                    builder.move_to(Point::new(px, py));
-                } else {
+                builder.move_to(Point::new(px, py));
+
+                for (pos, d) in &self.data.deflection_diagram {
+                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let d_ratio = d / max_d;
+                    let py = axis_y + (d_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
                 }
-            }
-        });
-        frame.stroke(&defl_path, Stroke::default().with_color(color).with_width(2.0));
+            });
+            frame.stroke(&defl_path, Stroke::default().with_color(color).with_width(2.0));
 
-        // Fill under curve
-        let fill_path = Path::new(|builder| {
-            builder.move_to(Point::new(x, axis_y));
-            for i in 0..=num_points {
-                let t = i as f64 / num_points as f64;
-                let d_ratio = self.data.deflection_ratio_at(t);
-                let px = x + (t as f32) * width;
-                let py = axis_y + (d_ratio as f32) * plot_height;
-                builder.line_to(Point::new(px, py));
-            }
-            builder.line_to(Point::new(x + width, axis_y));
-            builder.close();
-        });
-        frame.fill(&fill_path, Color { a: 0.2, ..color });
+            // Fill under curve
+            let fill_path = Path::new(|builder| {
+                builder.move_to(Point::new(x, axis_y));
+                for (pos, d) in &self.data.deflection_diagram {
+                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let d_ratio = d / max_d;
+                    let py = axis_y + (d_ratio as f32) * plot_height;
+                    builder.line_to(Point::new(px, py));
+                }
+                builder.line_to(Point::new(x + width, axis_y));
+                builder.close();
+            });
+            frame.fill(&fill_path, Color { a: 0.2, ..color });
+        }
 
         // Labels
         let title = Text {

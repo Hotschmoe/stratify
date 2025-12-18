@@ -17,15 +17,18 @@
 //! ## Available Calculations
 //!
 //! - [`beam`] - Simply-supported beam analysis (wood)
+//! - [`beam_analysis`] - Detailed beam analysis with superposition
 //! - [`column`] - Axial compression member analysis (wood)
 
 pub mod beam;
+pub mod beam_analysis;
 pub mod column;
 
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
 pub use beam::{BeamInput, BeamResult};
+pub use beam_analysis::{AnalysisResults, BeamAnalysis, SingleLoad};
 pub use column::{ColumnInput, ColumnResult};
 
 /// Enum wrapper for all calculation types.

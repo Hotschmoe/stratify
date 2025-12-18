@@ -49,9 +49,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{CalcError, CalcResult};
-use crate::loads::{DesignMethod, EnhancedLoadCase, LoadType};
+use crate::loads::{DesignMethod, EnhancedLoadCase, LoadDistribution, LoadType};
 use crate::materials::Material;
 use crate::nds_factors::{AdjustmentFactors, AdjustmentSummary, BeamStability, SizeFactor};
+
+use super::beam_analysis::{BeamAnalysis, SingleLoad};
 
 /// Input parameters for a simply-supported beam.
 ///
@@ -358,6 +360,23 @@ pub struct BeamResult {
     // === Adjustment Factors Applied ===
     /// Summary of all NDS adjustment factors used in this calculation
     pub adjustment_factors: AdjustmentSummary,
+
+    // === Support Reactions ===
+    /// Left support reaction (lb) - positive upward
+    pub reaction_left_lb: f64,
+    /// Right support reaction (lb) - positive upward
+    pub reaction_right_lb: f64,
+
+    // === Diagram Data (for rendering) ===
+    /// Shear diagram: Vec of (position_ft, shear_lb)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shear_diagram: Vec<(f64, f64)>,
+    /// Moment diagram: Vec of (position_ft, moment_ftlb)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moment_diagram: Vec<(f64, f64)>,
+    /// Deflection diagram: Vec of (position_ft, deflection_in)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deflection_diagram: Vec<(f64, f64)>,
 }
 
 impl BeamResult {
@@ -442,26 +461,115 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
     // Convert span to inches for deflection calc
     let span_in = input.span_ft * 12.0;
 
-    // === Get Design Load ===
-    // Build a load case that includes self-weight if enabled
+    // === Get Self Weight ===
     let self_wt = input.self_weight_plf();
-    let mut load_case_for_combo = input.load_case.to_load_case();
+
+    // === Convert DiscreteLoads to SingleLoads ===
+    // Group loads by type for applying load combination factors
+    let mut loads_by_type: Vec<(LoadType, SingleLoad)> = Vec::new();
+
+    // Add self-weight as dead load if enabled
     if input.load_case.include_self_weight {
-        // Add self-weight to dead load
-        let current_dead = load_case_for_combo.get(LoadType::Dead);
-        load_case_for_combo.set_load(LoadType::Dead, current_dead + self_wt);
+        loads_by_type.push((
+            LoadType::Dead,
+            SingleLoad::uniform_full(self_wt),
+        ));
     }
 
-    // Find governing combination
-    let (design_load_plf, governing_combination) = load_case_for_combo.governing_load(method);
+    // Convert each DiscreteLoad to SingleLoad
+    for discrete_load in &input.load_case.loads {
+        let magnitude = discrete_load.effective_magnitude();
+        let load_type = discrete_load.load_type;
 
-    // === Calculate Demand ===
+        let single = match &discrete_load.distribution {
+            LoadDistribution::Point { position_ft } => {
+                SingleLoad::point(magnitude, *position_ft)
+            }
+            LoadDistribution::UniformFull => {
+                SingleLoad::uniform_full(magnitude)
+            }
+            LoadDistribution::UniformPartial { start_ft, end_ft } => {
+                SingleLoad::uniform_partial(magnitude, *start_ft, *end_ft)
+            }
+            LoadDistribution::Moment { position_ft } => {
+                SingleLoad::moment(magnitude, *position_ft)
+            }
+            LoadDistribution::Trapezoidal { start_ft, end_ft, start_magnitude, end_magnitude } => {
+                // Approximate trapezoidal as partial uniform with average magnitude
+                let avg_mag = (start_magnitude + end_magnitude) / 2.0;
+                SingleLoad::uniform_partial(avg_mag, *start_ft, *end_ft)
+            }
+        };
 
-    // Maximum moment: M = wL²/8 (result in ft-lb)
-    let max_moment_ftlb = design_load_plf * input.span_ft.powi(2) / 8.0;
+        loads_by_type.push((load_type, single));
+    }
 
-    // Maximum shear: V = wL/2 (result in lb)
-    let max_shear_lb = design_load_plf * input.span_ft / 2.0;
+    // === Run Analysis for Each Load Combination ===
+    let combinations = method.combinations();
+    let mut governing_moment = 0.0f64;
+    let mut governing_combo_name = String::new();
+    let mut governing_analysis: Option<super::beam_analysis::AnalysisResults> = None;
+    let mut governing_total_plf = 0.0f64;
+
+    for combo in &combinations {
+        // Create analysis with factored loads
+        let mut analysis = BeamAnalysis::new(input.span_ft, props.e_psi, i);
+
+        let mut total_factored_plf = 0.0;
+
+        for (load_type, single_load) in &loads_by_type {
+            let factor = combo.get_factor(*load_type);
+            if factor.abs() < 1e-10 {
+                continue; // Skip loads with zero factor
+            }
+
+            // Create factored copy of the load
+            let factored_load = match single_load {
+                SingleLoad::Point { magnitude_lb, position_ft } => {
+                    SingleLoad::point(magnitude_lb * factor, *position_ft)
+                }
+                SingleLoad::UniformFull { magnitude_plf } => {
+                    total_factored_plf += magnitude_plf * factor;
+                    SingleLoad::uniform_full(magnitude_plf * factor)
+                }
+                SingleLoad::UniformPartial { magnitude_plf, start_ft, end_ft } => {
+                    SingleLoad::uniform_partial(magnitude_plf * factor, *start_ft, *end_ft)
+                }
+                SingleLoad::Moment { magnitude_ftlb, position_ft } => {
+                    SingleLoad::moment(magnitude_ftlb * factor, *position_ft)
+                }
+            };
+
+            analysis.add_load(factored_load);
+        }
+
+        // Skip empty analyses
+        if analysis.loads.is_empty() {
+            continue;
+        }
+
+        let results = analysis.analyze();
+
+        // Check if this combination governs (based on maximum moment)
+        if results.max_moment_ftlb > governing_moment {
+            governing_moment = results.max_moment_ftlb;
+            governing_combo_name = combo.name.clone();
+            governing_analysis = Some(results);
+            governing_total_plf = total_factored_plf;
+        }
+    }
+
+    // Use governing analysis results
+    let analysis_results = governing_analysis.unwrap_or_else(|| {
+        // Fallback for empty load case - run with zero load
+        let analysis = BeamAnalysis::new(input.span_ft, props.e_psi, i);
+        analysis.analyze()
+    });
+
+    let max_moment_ftlb = analysis_results.max_moment_ftlb;
+    let max_shear_lb = analysis_results.max_shear_lb;
+    let design_load_plf = governing_total_plf; // For display purposes
+    let governing_combination = governing_combo_name;
 
     // === Apply NDS Adjustment Factors ===
     // (Calculated early so we can use adjusted E for deflection)
@@ -517,11 +625,9 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
     // Calculate adjusted E for deflection
     let e_adjusted = factors.adjusted_e(props.e_psi);
 
-    // Maximum deflection: δ = 5wL⁴/(384EI)
-    // Need consistent units: w in lb/in, L in inches, E in psi, I in in⁴
-    // Uses adjusted E' per NDS
-    let w_lb_per_in = design_load_plf / 12.0;
-    let max_deflection_in = 5.0 * w_lb_per_in * span_in.powi(4) / (384.0 * e_adjusted * i);
+    // Maximum deflection from analysis (computed with raw E)
+    // Scale by E_raw/E_adjusted since δ ∝ 1/E
+    let max_deflection_in = analysis_results.max_deflection_in * (props.e_psi / e_adjusted);
 
     // === Calculate Stresses ===
 
@@ -572,6 +678,15 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
         fv_reference_psi: props.fv_psi,
         e_psi: props.e_psi,
         adjustment_factors: adjustment_summary,
+        // Reactions from analysis
+        reaction_left_lb: analysis_results.reaction_left_lb,
+        reaction_right_lb: analysis_results.reaction_right_lb,
+        // Diagram data from analysis (scale deflection for adjusted E)
+        shear_diagram: analysis_results.shear_diagram,
+        moment_diagram: analysis_results.moment_diagram,
+        deflection_diagram: analysis_results.deflection_diagram.into_iter()
+            .map(|(x, d)| (x, d * (props.e_psi / e_adjusted)))
+            .collect(),
     })
 }
 
@@ -822,5 +937,149 @@ mod tests {
         // Should report which combination governs
         assert!(!result.governing_combination.is_empty());
         assert!(result.governing_combination.contains("ASD"));
+    }
+
+    #[test]
+    fn test_point_load_midspan() {
+        // 10 ft beam with 1000 lb point load at midspan
+        // M_max = PL/4 = 1000 * 10 / 4 = 2500 ft-lb
+        let load_case = EnhancedLoadCase::new("Point Load Test")
+            .with_load(DiscreteLoad::point(LoadType::Live, 1000.0, 5.0));
+
+        let beam = BeamInput {
+            label: "Point Load Beam".to_string(),
+            span_ft: 10.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
+        };
+
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // Max moment should be PL/4 = 2500 ft-lb (within 1%)
+        assert!(
+            (result.max_moment_ftlb - 2500.0).abs() < 25.0,
+            "Expected ~2500 ft-lb, got {} ft-lb",
+            result.max_moment_ftlb
+        );
+
+        // Max shear should be P/2 = 500 lb (symmetric)
+        assert!(
+            (result.max_shear_lb - 500.0).abs() < 5.0,
+            "Expected ~500 lb, got {} lb",
+            result.max_shear_lb
+        );
+    }
+
+    #[test]
+    fn test_point_load_asymmetric() {
+        // 10 ft beam with 1000 lb point load at 3 ft from left
+        // R1 = P(L-a)/L = 1000 * 7/10 = 700 lb
+        // R2 = Pa/L = 1000 * 3/10 = 300 lb
+        // M_max at load point = R1 * a = 700 * 3 = 2100 ft-lb
+        let load_case = EnhancedLoadCase::new("Asymmetric Point Load")
+            .with_load(DiscreteLoad::point(LoadType::Live, 1000.0, 3.0));
+
+        let beam = BeamInput {
+            label: "Asymmetric Point Load".to_string(),
+            span_ft: 10.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
+        };
+
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // Max moment = Pa(L-a)/L = 1000 * 3 * 7 / 10 = 2100 ft-lb
+        assert!(
+            (result.max_moment_ftlb - 2100.0).abs() < 50.0,
+            "Expected ~2100 ft-lb, got {} ft-lb",
+            result.max_moment_ftlb
+        );
+
+        // Reactions
+        assert!(
+            (result.reaction_left_lb - 700.0).abs() < 10.0,
+            "Expected R1 ~700 lb, got {} lb",
+            result.reaction_left_lb
+        );
+        assert!(
+            (result.reaction_right_lb - 300.0).abs() < 10.0,
+            "Expected R2 ~300 lb, got {} lb",
+            result.reaction_right_lb
+        );
+    }
+
+    #[test]
+    fn test_combined_uniform_and_point_load() {
+        // 12 ft beam with:
+        // - 50 plf uniform dead load
+        // - 1000 lb point live load at midspan
+        //
+        // Uniform: M = wL²/8 = 50 * 144 / 8 = 900 ft-lb
+        // Point: M = PL/4 = 1000 * 12 / 4 = 3000 ft-lb
+        // Total at midspan (superposition): 3900 ft-lb
+        let load_case = EnhancedLoadCase::new("Combined Loads")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
+            .with_load(DiscreteLoad::point(LoadType::Live, 1000.0, 6.0));
+
+        let beam = BeamInput {
+            label: "Combined Load Beam".to_string(),
+            span_ft: 12.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
+        };
+
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // For ASD with D + L combination, max moment should be ~3900 ft-lb
+        assert!(
+            (result.max_moment_ftlb - 3900.0).abs() < 100.0,
+            "Expected ~3900 ft-lb, got {} ft-lb",
+            result.max_moment_ftlb
+        );
+    }
+
+    #[test]
+    fn test_diagram_data_populated() {
+        let beam = test_beam();
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // Diagram data should be populated
+        assert!(
+            !result.shear_diagram.is_empty(),
+            "Shear diagram should have data"
+        );
+        assert!(
+            !result.moment_diagram.is_empty(),
+            "Moment diagram should have data"
+        );
+        assert!(
+            !result.deflection_diagram.is_empty(),
+            "Deflection diagram should have data"
+        );
+
+        // First point should be at x = 0
+        assert!((result.shear_diagram[0].0 - 0.0).abs() < 0.01);
+
+        // Last point should be at span
+        let last_idx = result.shear_diagram.len() - 1;
+        assert!((result.shear_diagram[last_idx].0 - 12.0).abs() < 0.01);
     }
 }
