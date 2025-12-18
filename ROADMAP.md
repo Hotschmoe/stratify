@@ -4,7 +4,7 @@ This document outlines the phased development approach for Stratify, from initia
 
 ## Current Status
 
-**PHASE 2 COMPLETE!** ✓ (as of 2025-12-17)
+**PHASE 2 COMPLETE!** ✓ + **WASM WORKING!** ✓ (as of 2025-12-17)
 
 Full GUI application with graphics, reporting, and file management:
 - ✅ Beam input parameters (GUI form with validation)
@@ -12,12 +12,13 @@ Full GUI application with graphics, reporting, and file management:
 - ✅ Professional PDF report generation with Typst + BerkeleyMono font
 - ✅ Multi-beam PDF export (cover page + individual beam pages)
 - ✅ Project file save/load with atomic writes and file locking
-- ✅ Iced 0.13 GUI with toolbar (New, Open, Save, Save As, Export PDF)
+- ✅ Iced 0.14 GUI with toolbar (New, Open, Save, Save As, Export PDF)
 - ✅ Read-only mode for locked files with status display
 - ✅ Beam selection and editing from project item list
 - ✅ Keyboard shortcuts (Ctrl+N/O/S, Ctrl+Shift+S)
 - ✅ **Diagram rendering** - beam schematic, shear, moment, deflection plots
 - ✅ Support reactions displayed (R = wL/2) for post/footing design
+- ✅ **WebAssembly browser support** - runs in Chrome/Edge with WebGPU
 
 **Next Priority**: Phase 3 engineering calculations (NDS adjustment factors, load combinations)
 
@@ -285,12 +286,13 @@ Full GUI application with graphics, reporting, and file management:
 
 ## Phase 4: Production & Polish (Month 7+)
 
-### Month 7: WebAssembly Deployment 🔲 NOT STARTED
+### Month 7: WebAssembly Deployment ✅ COMPLETE
 
-- [ ] Set up WASM target compilation
-- [ ] Configure Iced for WASM
-- [ ] Test in browsers (Chrome, Firefox, Safari)
+- [x] Set up WASM target compilation (wasm32-unknown-unknown)
+- [x] Configure Iced 0.14 for WASM (wgpu 27.0, WebGPU backend)
+- [x] Test in browsers (Chrome, Edge with WebGPU support)
 - [ ] Deploy to web hosting
+- [ ] Test Firefox and Safari WebGPU support
 
 ### Month 8: UI/UX Polish ⚠️ PARTIAL
 

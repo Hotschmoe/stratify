@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Stratify is a cross-platform structural engineering calculation suite written in Rust. It provides native desktop applications (Windows, macOS, Linux) and a WebAssembly-based web application for structural analysis, design, and PDF report generation.
 
-**Current Status**: Phase 3 in progress. NDS adjustment factors implemented with GUI. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
+**Current Status**: Phase 3 in progress. NDS adjustment factors implemented with GUI. **WASM browser support working** with Iced 0.14 + WebGPU. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
 
 ## Build Commands
 
@@ -23,9 +23,9 @@ cargo test
 # Build CLI (placeholder only)
 cargo run --bin calc_cli
 
-# Build WebAssembly (compiles, runtime issue documented)
+# Build and run WebAssembly (working with WebGPU)
 rustup target add wasm32-unknown-unknown
-trunk build --release
+cd calc_gui && trunk serve --open
 ```
 
 ## Architecture
@@ -53,7 +53,7 @@ stratify/
 │   ├── file_io.rs       # Atomic saves, FileLock with .lock files
 │   ├── pdf.rs           # Typst-based PDF generation
 │   └── errors.rs        # CalcError enum for structured errors
-├── calc_gui/            # [BIN] Iced 0.13 GUI application
+├── calc_gui/            # [BIN] Iced 0.14 GUI application
 │   └── main.rs          # ~2400 lines (see GUI_LAYOUT.md for panel structure)
 └── calc_cli/            # [BIN] Placeholder CLI
 ```
@@ -115,11 +115,10 @@ Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map 
 - Steel and concrete materials
 - Point load/partial uniform calculations in beam solver (UI ready, calc treats as uniform)
 - CLI interface (basic stdin demo only)
-- WASM runtime (compiles but canvas context conflict - documented in NEXT_TODO.md)
 
 ## Tech Stack
 
-- **GUI**: Iced 0.13 with canvas feature for diagrams
+- **GUI**: Iced 0.14 with canvas feature for diagrams, wgpu 27.0 for WebGPU
 - **PDF**: typst 0.14 + typst-pdf + typst-assets (BerkeleyMono font)
 - **Serialization**: serde/serde_json
 - **File Locking**: fs2 for cross-platform network drive safety

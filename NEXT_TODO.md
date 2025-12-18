@@ -1,36 +1,38 @@
 # Next Steps
 
-## WASM Sanity Check: COMPLETE ✓
+## WASM Browser Support: COMPLETE ✓
 
-We validated that our architecture compiles to WebAssembly. The build works but there's a runtime issue to address later.
+WebAssembly build now runs successfully in browsers with WebGPU support.
 
-### WASM Test Results
+### WASM Implementation
 - [x] Add wasm32-unknown-unknown target
-- [x] `cargo build --target wasm32-unknown-unknown --bin calc_gui` - SUCCESS
+- [x] Upgraded to **Iced 0.14** (uses wgpu 27.0 with proper WebGPU browser support)
 - [x] Fixed dependencies for WASM:
   - `uuid` - added `js` feature for random number generation
   - `fs2` - made native-only with conditional compilation (FileLock stubbed for WASM)
   - `rfd` - file dialogs are native-only (stubbed for WASM with browser messages)
 - [x] Added `console_error_panic_hook` for browser debugging
-- [x] Created `index.html` for Trunk bundler
-- [x] All 101 native tests still pass
+- [x] Created `index.html` for Trunk bundler with loading spinner
+- [x] Configured WASM build to use only wgpu (no tiny-skia fallback)
+- [x] All native tests still pass
 
-### Known WASM Runtime Issue
-**Status:** Compiles but crashes at runtime in browser
+### Build & Run WASM
+```bash
+# Install dependencies
+rustup target add wasm32-unknown-unknown
+cargo install trunk
 
-**Error:** Iced's fallback renderer (tiny_skia) conflicts with wgpu canvas context
+# Build and serve
+cd calc_gui
+trunk serve --open
 ```
-panicked at iced_tiny_skia: "A canvas context other than `CanvasRenderingContext2d` was already created"
-```
 
-**Root Cause:** When wgpu's `request_adapter()` returns None (WebGPU not fully available), Iced falls back to tiny_skia which tries to create a 2D canvas context on the same canvas element that wgpu touched.
+Opens at http://[::1]:8080 with full GUI functionality.
 
-**Solutions (for later):**
-1. Add `webgl` feature to Iced (enables WebGL2 fallback within wgpu, avoids tiny_skia)
-2. Investigate why `request_adapter()` returns None on browsers that support WebGPU
-3. Configure Iced to disable tiny_skia fallback for WebGPU-only builds
-
-**Decision:** WASM is not priority. Compiles successfully. Will address runtime issue when WASM becomes focus.
+### Previous Issue (RESOLVED)
+The canvas context conflict between wgpu and tiny_skia has been fixed by:
+1. Upgrading to Iced 0.14 with wgpu 27.0 (proper WebGPU API compatibility)
+2. Disabling tiny_skia fallback for WASM builds (wgpu-only configuration)
 
 ---
 

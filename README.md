@@ -84,10 +84,10 @@ This architecture enables future integration as an MCP server, giving AI assista
 
 ### GUI & Graphics
 
-- **GUI Framework**: `iced` - Type-safe, cross-platform GUI framework
-- **Graphics Backend**: `wgpu` - Portable WebGPU implementation (via Iced)
+- **GUI Framework**: `iced` 0.14 - Type-safe, cross-platform GUI framework
+- **Graphics Backend**: `wgpu` 27.0 - Portable WebGPU implementation (via Iced)
   - Native: Vulkan (Linux), Metal (macOS), DirectX 12 (Windows)
-  - Web: WebGPU with WebGL2 fallback
+  - Web: WebGPU (Chrome, Edge) - fully functional
 
 ### TUI
 
@@ -335,13 +335,15 @@ cargo build --release --bin calc_cli
 ### Build WebAssembly
 
 ```bash
-# Install wasm target
+# Install wasm target and trunk bundler
 rustup target add wasm32-unknown-unknown
+cargo install trunk
 
-# Build WASM
-cargo build --release --target wasm32-unknown-unknown --bin calc_gui
+# Build and serve WASM (opens browser)
+cd calc_gui
+trunk serve --open
 
-# Use trunk or wasm-pack for bundling
+# Or build release for deployment
 trunk build --release
 ```
 
@@ -393,7 +395,8 @@ See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
 ### High Priority (Next Steps)
 
 - [x] ~~PDF generation with Typst templates~~ ✅ DONE
-- [ ] Basic GUI with Iced framework ← **NEXT PRIORITY**
+- [x] ~~Basic GUI with Iced framework~~ ✅ DONE (Iced 0.14 + WebGPU)
+- [x] ~~WebAssembly browser support~~ ✅ DONE
 - [ ] Steel section database (common W-shapes)
 - [ ] Concrete material properties
 
@@ -418,7 +421,7 @@ See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
 
 ### Platform Features
 
-- [ ] WebAssembly deployment
+- [x] WebAssembly deployment (working with WebGPU in Chrome/Edge)
 - [ ] Cloud sync integration (beyond file locking)
 - [ ] CAD interoperability (IFC import/export)
 - [ ] MCP server for LLM integration
