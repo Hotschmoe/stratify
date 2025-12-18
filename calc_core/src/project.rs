@@ -103,6 +103,7 @@ impl Project {
     /// use calc_core::calculations::{CalculationItem, BeamInput};
     /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
     /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
+    /// use calc_core::nds_factors::AdjustmentFactors;
     ///
     /// let mut project = Project::new("Engineer", "25-001", "Client");
     ///
@@ -117,6 +118,7 @@ impl Project {
     ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
     ///     width_in: 1.5,
     ///     depth_in: 9.25,
+    ///     adjustment_factors: AdjustmentFactors::default(),
     /// };
     ///
     /// let id = project.add_item(CalculationItem::Beam(beam));
@@ -332,6 +334,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: crate::nds_factors::AdjustmentFactors::default(),
         };
 
         let id = project.add_item(CalculationItem::Beam(beam));

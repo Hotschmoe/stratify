@@ -29,6 +29,7 @@
 //! - [`calculations`] - All structural calculation types (beams, columns, etc.)
 //! - [`materials`] - Material definitions and databases
 //! - [`loads`] - Load types and ASCE 7 load combinations
+//! - [`nds_factors`] - NDS adjustment factors (C_D, C_M, C_t, C_L, etc.)
 //! - [`units`] - Type-safe unit wrappers
 //! - [`errors`] - Structured error types
 //! - [`file_io`] - File operations with atomic saves and locking
@@ -39,6 +40,7 @@ pub mod errors;
 pub mod file_io;
 pub mod loads;
 pub mod materials;
+pub mod nds_factors;
 pub mod pdf;
 pub mod project;
 pub mod units;
@@ -48,5 +50,6 @@ pub use errors::{CalcError, CalcResult};
 pub use file_io::{save_project, load_project, FileLock};
 pub use loads::{LoadType, LoadCase, LoadCombination, DesignMethod};
 pub use materials::Material;
+pub use nds_factors::{AdjustmentFactors, LoadDuration, WetService, RepetitiveMember};
 pub use pdf::render_beam_pdf;
 pub use project::{Project, ProjectMetadata, GlobalSettings};

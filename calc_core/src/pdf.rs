@@ -15,6 +15,7 @@
 //! use calc_core::calculations::beam::{BeamInput, calculate};
 //! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 //! use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+//! use calc_core::nds_factors::AdjustmentFactors;
 //!
 //! let load_case = EnhancedLoadCase::new("Floor")
 //!     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
@@ -27,6 +28,7 @@
 //!     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 //!     width_in: 1.5,
 //!     depth_in: 9.25,
+//!     adjustment_factors: AdjustmentFactors::default(),
 //! };
 //!
 //! let result = calculate(&input, DesignMethod::Asd).unwrap();
@@ -349,6 +351,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 /// use calc_core::calculations::beam::{BeamInput, calculate};
 /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+/// use calc_core::nds_factors::AdjustmentFactors;
 ///
 /// let load_case = EnhancedLoadCase::new("Floor")
 ///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
@@ -361,6 +364,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 ///     width_in: 1.5,
 ///     depth_in: 9.25,
+///     adjustment_factors: AdjustmentFactors::default(),
 /// };
 ///
 /// let result = calculate(&input, DesignMethod::Asd).unwrap();
@@ -810,6 +814,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: crate::nds_factors::AdjustmentFactors::default(),
         };
 
         let result = calculate(&input, DesignMethod::Asd).unwrap();

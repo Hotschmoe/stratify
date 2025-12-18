@@ -58,6 +58,7 @@ fn main() {
         )),
         width_in: 1.5,
         depth_in: 9.25,
+        adjustment_factors: calc_core::nds_factors::AdjustmentFactors::default(),
     };
 
     match calculate(&beam, DesignMethod::Asd) {

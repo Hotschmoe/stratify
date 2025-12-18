@@ -26,6 +26,9 @@ use calc_core::materials::{
     GlulamLayup, GlulamMaterial, GlulamStressClass, LvlGrade, LvlMaterial, Material, PslGrade,
     PslMaterial, WoodGrade, WoodMaterial, WoodSpecies,
 };
+use calc_core::nds_factors::{
+    AdjustmentFactors, FlatUse, Incising, LoadDuration, RepetitiveMember, Temperature, WetService,
+};
 use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
 
@@ -201,6 +204,10 @@ const BERKELEY_MONO_BOLD: &[u8] =
     include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold.otf");
 
 fn main() -> iced::Result {
+    // Set up panic hook for WASM to show errors in browser console
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
     iced::application("Stratify - Structural Engineering", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| Theme::Light)
@@ -253,6 +260,15 @@ struct App {
     selected_lvl_grade: Option<LvlGrade>,
     // PSL
     selected_psl_grade: Option<PslGrade>,
+
+    // NDS Adjustment Factors
+    selected_load_duration: LoadDuration,
+    selected_wet_service: WetService,
+    selected_temperature: Temperature,
+    selected_incising: Incising,
+    selected_repetitive_member: RepetitiveMember,
+    selected_flat_use: FlatUse,
+    compression_edge_braced: bool,
 
     // Calculation results (store input too for diagram plotting)
     calc_input: Option<BeamInput>,
@@ -307,6 +323,14 @@ impl Default for App {
             selected_glulam_layup: Some(GlulamLayup::Unbalanced),
             selected_lvl_grade: Some(LvlGrade::Standard),
             selected_psl_grade: Some(PslGrade::Standard),
+            // NDS Adjustment Factors - typical interior floor beam defaults
+            selected_load_duration: LoadDuration::Normal,
+            selected_wet_service: WetService::Dry,
+            selected_temperature: Temperature::Normal,
+            selected_incising: Incising::None,
+            selected_repetitive_member: RepetitiveMember::Single,
+            selected_flat_use: FlatUse::Normal,
+            compression_edge_braced: true,
             calc_input: None,
             result: None,
             error_message: None,
@@ -399,6 +423,15 @@ enum Message {
     LvlGradeSelected(LvlGrade),
     // PSL
     PslGradeSelected(PslGrade),
+
+    // NDS Adjustment Factors
+    LoadDurationSelected(LoadDuration),
+    WetServiceSelected(WetService),
+    TemperatureSelected(Temperature),
+    IncisingSelected(Incising),
+    RepetitiveMemberSelected(RepetitiveMember),
+    FlatUseSelected(FlatUse),
+    CompressionBracedToggled(bool),
 
     // Actions
     DeleteSelectedBeam,
@@ -615,6 +648,43 @@ impl App {
             }
             Message::PslGradeSelected(grade) => {
                 self.selected_psl_grade = Some(grade);
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+
+            // NDS Adjustment Factors - all trigger live preview update
+            Message::LoadDurationSelected(duration) => {
+                self.selected_load_duration = duration;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::WetServiceSelected(wet) => {
+                self.selected_wet_service = wet;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::TemperatureSelected(temp) => {
+                self.selected_temperature = temp;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::IncisingSelected(incising) => {
+                self.selected_incising = incising;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::RepetitiveMemberSelected(rep) => {
+                self.selected_repetitive_member = rep;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::FlatUseSelected(flat) => {
+                self.selected_flat_use = flat;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::CompressionBracedToggled(braced) => {
+                self.compression_edge_braced = braced;
                 self.auto_save_beam();
                 self.try_calculate();
             }
@@ -838,6 +908,15 @@ impl App {
                     }
                 }
 
+                // Extract adjustment factors
+                self.selected_load_duration = beam.adjustment_factors.load_duration;
+                self.selected_wet_service = beam.adjustment_factors.wet_service;
+                self.selected_temperature = beam.adjustment_factors.temperature;
+                self.selected_incising = beam.adjustment_factors.incising;
+                self.selected_repetitive_member = beam.adjustment_factors.repetitive_member;
+                self.selected_flat_use = beam.adjustment_factors.flat_use;
+                self.compression_edge_braced = beam.adjustment_factors.compression_edge_braced;
+
                 self.error_message = None;
                 self.status = format!("Selected: {}", beam.label);
 
@@ -907,6 +986,7 @@ impl App {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: calc_core::nds_factors::AdjustmentFactors::default(),
         };
 
         // Add to project and get the ID
@@ -994,6 +1074,18 @@ impl App {
             return;
         }
 
+        // Build adjustment factors from UI state
+        let adjustment_factors = AdjustmentFactors {
+            load_duration: self.selected_load_duration,
+            wet_service: self.selected_wet_service,
+            temperature: self.selected_temperature,
+            incising: self.selected_incising,
+            repetitive_member: self.selected_repetitive_member,
+            flat_use: self.selected_flat_use,
+            compression_edge_braced: self.compression_edge_braced,
+            unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
+        };
+
         let beam = BeamInput {
             label: self.beam_label.clone(),
             span_ft,
@@ -1001,6 +1093,7 @@ impl App {
             material,
             width_in,
             depth_in,
+            adjustment_factors,
         };
 
         // Update the beam in the project
@@ -1105,6 +1198,18 @@ impl App {
             return;
         }
 
+        // Build adjustment factors from UI state
+        let adjustment_factors = AdjustmentFactors {
+            load_duration: self.selected_load_duration,
+            wet_service: self.selected_wet_service,
+            temperature: self.selected_temperature,
+            incising: self.selected_incising,
+            repetitive_member: self.selected_repetitive_member,
+            flat_use: self.selected_flat_use,
+            compression_edge_braced: self.compression_edge_braced,
+            unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
+        };
+
         // Build input
         let input = BeamInput {
             label: self.beam_label.clone(),
@@ -1113,6 +1218,7 @@ impl App {
             material,
             width_in,
             depth_in,
+            adjustment_factors,
         };
 
         // Run calculation
@@ -1575,6 +1681,9 @@ impl App {
         ]
         .spacing(2);
 
+        // NDS Adjustment Factors section
+        let adjustment_factors_section = self.view_adjustment_factors();
+
         // Only show Delete button for existing beams
         let action_buttons = if self.selected_beam_id().is_some() {
             row![
@@ -1593,9 +1702,112 @@ impl App {
             loads_section,
             vertical_space().height(10),
             material_section,
+            vertical_space().height(10),
+            adjustment_factors_section,
             vertical_space().height(15),
             action_buttons,
         ]
+    }
+
+    fn view_adjustment_factors(&self) -> Element<'_, Message> {
+        // Core factors that are commonly adjusted
+        let core_factors = column![
+            row![
+                text("Load Duration:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &LoadDuration::ALL[..],
+                    Some(self.selected_load_duration),
+                    Message::LoadDurationSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+            row![
+                text("Wet Service:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &WetService::ALL[..],
+                    Some(self.selected_wet_service),
+                    Message::WetServiceSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+            row![
+                text("Repetitive:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &RepetitiveMember::ALL[..],
+                    Some(self.selected_repetitive_member),
+                    Message::RepetitiveMemberSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(4);
+
+        // Less common factors (temperature, incising, flat use)
+        let other_factors = column![
+            row![
+                text("Temperature:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &Temperature::ALL[..],
+                    Some(self.selected_temperature),
+                    Message::TemperatureSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+            row![
+                text("Incising:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &Incising::ALL[..],
+                    Some(self.selected_incising),
+                    Message::IncisingSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+            row![
+                text("Flat Use:").size(10).width(Length::Fixed(100.0)),
+                pick_list(
+                    &FlatUse::ALL[..],
+                    Some(self.selected_flat_use),
+                    Message::FlatUseSelected
+                )
+                .width(Length::Fill)
+                .text_size(10),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(4);
+
+        // Beam stability (bracing)
+        let bracing = checkbox("Compression edge braced (C_L = 1.0)", self.compression_edge_braced)
+            .on_toggle(Message::CompressionBracedToggled)
+            .text_size(10);
+
+        column![
+            text("NDS Adjustment Factors").size(14),
+            vertical_space().height(6),
+            core_factors,
+            vertical_space().height(6),
+            other_factors,
+            vertical_space().height(6),
+            bracing,
+        ]
+        .spacing(2)
+        .into()
     }
 
     fn view_load_table(&self) -> Element<'_, Message> {

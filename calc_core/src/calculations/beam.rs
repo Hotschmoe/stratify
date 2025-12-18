@@ -17,6 +17,7 @@
 //! use calc_core::calculations::beam::{BeamInput, calculate};
 //! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 //! use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+//! use calc_core::nds_factors::AdjustmentFactors;
 //!
 //! // Define beam input with multiple discrete loads
 //! let load_case = EnhancedLoadCase::new("Floor Loads")
@@ -34,6 +35,7 @@
 //!     )),
 //!     width_in: 1.5,  // 2x nominal
 //!     depth_in: 9.25, // 10 nominal
+//!     adjustment_factors: AdjustmentFactors::default(),
 //! };
 //!
 //! let result = calculate(&input, DesignMethod::Asd).unwrap();
@@ -49,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use crate::errors::{CalcError, CalcResult};
 use crate::loads::{DesignMethod, EnhancedLoadCase, LoadType};
 use crate::materials::Material;
+use crate::nds_factors::{AdjustmentFactors, AdjustmentSummary, BeamStability, SizeFactor};
 
 /// Input parameters for a simply-supported beam.
 ///
@@ -124,6 +127,14 @@ pub struct BeamInput {
 
     /// Actual beam depth in inches (e.g., 9.25 for 2x10, 16.5 for glulam)
     pub depth_in: f64,
+
+    /// NDS adjustment factors (C_D, C_M, C_t, C_r, etc.)
+    ///
+    /// Controls load duration, wet service, temperature, repetitive member,
+    /// and other adjustment factors per NDS Chapter 4.
+    /// Defaults to normal duration, dry service, normal temperature.
+    #[serde(default)]
+    pub adjustment_factors: AdjustmentFactors,
 }
 
 /// Typical wood density for self-weight calculation (pcf)
@@ -343,6 +354,10 @@ pub struct BeamResult {
 
     /// Modulus of elasticity E (psi)
     pub e_psi: f64,
+
+    // === Adjustment Factors Applied ===
+    /// Summary of all NDS adjustment factors used in this calculation
+    pub adjustment_factors: AdjustmentSummary,
 }
 
 impl BeamResult {
@@ -390,6 +405,7 @@ impl BeamResult {
 /// use calc_core::calculations::beam::{BeamInput, calculate};
 /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
+/// use calc_core::nds_factors::AdjustmentFactors;
 ///
 /// let load_case = EnhancedLoadCase::new("Floor")
 ///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 15.0))
@@ -405,6 +421,7 @@ impl BeamResult {
 ///     )),
 ///     width_in: 1.5,
 ///     depth_in: 9.25,
+///     adjustment_factors: AdjustmentFactors::default(),
 /// };
 ///
 /// let result = calculate(&input, DesignMethod::Asd).expect("Calculation should succeed");
@@ -446,10 +463,65 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
     // Maximum shear: V = wL/2 (result in lb)
     let max_shear_lb = design_load_plf * input.span_ft / 2.0;
 
+    // === Apply NDS Adjustment Factors ===
+    // (Calculated early so we can use adjusted E for deflection)
+    let factors = &input.adjustment_factors;
+
+    // Calculate size factor C_F for sawn lumber (NDS Table 4A footnote)
+    // Engineered lumber (LVL/PSL) handles depth adjustment internally via fb_for_depth
+    let c_f = if !input.material.is_engineered() {
+        SizeFactor::new(input.depth_in, input.width_in).factor_fb()
+    } else {
+        1.0
+    };
+
+    // Get base Fb adjusted for depth (handles LVL/PSL depth factor automatically)
+    let fb_depth_adjusted = input.material.fb_for_depth(input.depth_in);
+
+    // Calculate beam stability factor C_L
+    // If compression edge is braced, C_L = 1.0
+    // Otherwise, calculate based on slenderness
+    let c_l = if factors.compression_edge_braced {
+        1.0
+    } else {
+        // Use unbraced length or default to span
+        let le = factors.unbraced_length_in.unwrap_or(span_in);
+        let stability = BeamStability::new(le, input.width_in, input.depth_in);
+
+        // Check if effectively braced (short unbraced length)
+        if stability.is_fully_braced() {
+            1.0
+        } else {
+            // Calculate Fb* (Fb with all factors except C_L)
+            // Fb* = Fb × C_D × C_M × C_t × C_F × C_fu × C_i × C_r
+            let fb_star = fb_depth_adjusted
+                * factors.c_d()
+                * factors.c_m_fb()
+                * factors.c_t()
+                * c_f
+                * factors.c_fu(input.width_in)
+                * factors.c_i_strength()
+                * factors.c_r();
+
+            // Calculate E'min
+            let e_min_prime = factors.adjusted_e_min(props.e_min_psi);
+
+            stability.factor(fb_star, e_min_prime)
+        }
+    };
+
+    // Calculate adjusted allowable stresses using all NDS factors
+    let allowable_fb_psi = factors.adjusted_fb(fb_depth_adjusted, c_f, c_l, input.width_in);
+    let allowable_fv_psi = factors.adjusted_fv(props.fv_psi);
+
+    // Calculate adjusted E for deflection
+    let e_adjusted = factors.adjusted_e(props.e_psi);
+
     // Maximum deflection: δ = 5wL⁴/(384EI)
     // Need consistent units: w in lb/in, L in inches, E in psi, I in in⁴
+    // Uses adjusted E' per NDS
     let w_lb_per_in = design_load_plf / 12.0;
-    let max_deflection_in = 5.0 * w_lb_per_in * span_in.powi(4) / (384.0 * props.e_psi * i);
+    let max_deflection_in = 5.0 * w_lb_per_in * span_in.powi(4) / (384.0 * e_adjusted * i);
 
     // === Calculate Stresses ===
 
@@ -460,29 +532,6 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
 
     // Shear stress: fv = 3V/(2bd) = 3V/(2A)
     let actual_fv_psi = 3.0 * max_shear_lb / (2.0 * area);
-
-    // === Apply NDS Adjustment Factors ===
-    // For this MVP, we use simplified factors:
-    // C_D = 1.0 (normal duration)
-    // C_M = 1.0 (dry service)
-    // C_t = 1.0 (normal temperature)
-    // C_F = size factor (applied via fb_for_depth for LVL/PSL)
-    // C_r = 1.0 (not repetitive for single beam)
-
-    // Get Fb adjusted for depth (handles LVL/PSL depth factor automatically)
-    let fb_depth_adjusted = input.material.fb_for_depth(input.depth_in);
-
-    // Additional size factor C_F for sawn lumber bending (NDS Table 4A footnote)
-    // For depths > 12", C_F = (12/d)^(1/9)
-    // Note: LVL/PSL handle this in fb_for_depth, glulam uses volume factor separately
-    let c_f = if !input.material.is_engineered() && input.depth_in > 12.0 {
-        (12.0 / input.depth_in).powf(1.0 / 9.0)
-    } else {
-        1.0
-    };
-
-    let allowable_fb_psi = fb_depth_adjusted * c_f;
-    let allowable_fv_psi = props.fv_psi; // No adjustment for shear in simple case
 
     // === Unity Checks ===
 
@@ -497,6 +546,9 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
         f64::INFINITY
     };
     let deflection_unity = deflection_limit_ratio / deflection_ratio;
+
+    // Generate adjustment factors summary for reporting
+    let adjustment_summary = factors.summary(input.width_in, input.depth_in, c_f, c_l);
 
     Ok(BeamResult {
         design_load_plf,
@@ -519,6 +571,7 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
         fb_reference_psi: props.fb_psi,
         fv_reference_psi: props.fv_psi,
         e_psi: props.e_psi,
+        adjustment_factors: adjustment_summary,
     })
 }
 
@@ -544,6 +597,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
         }
     }
 
@@ -615,6 +669,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
         };
         let result = calculate(&beam, DesignMethod::Asd).unwrap();
         assert!(result.passes());
@@ -636,6 +691,7 @@ mod tests {
             )),
             width_in: 5.125,
             depth_in: 16.5,
+            adjustment_factors: AdjustmentFactors::default(),
         };
         let result = calculate(&beam, DesignMethod::Asd).unwrap();
         // Should have higher allowable Fb than sawn lumber
@@ -655,6 +711,7 @@ mod tests {
             material: Material::Lvl(LvlMaterial::new(LvlGrade::Standard)),
             width_in: 1.75,
             depth_in: 11.875,
+            adjustment_factors: AdjustmentFactors::default(),
         };
         let result = calculate(&beam, DesignMethod::Asd).unwrap();
         // LVL should have higher E than sawn lumber
@@ -722,6 +779,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
         };
 
         let beam_with_sw = BeamInput {
@@ -734,6 +792,7 @@ mod tests {
             )),
             width_in: 1.5,
             depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
         };
 
         let result_no_sw = calculate(&beam_no_sw, DesignMethod::Asd).unwrap();
