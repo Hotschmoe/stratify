@@ -1,0 +1,20 @@
+[package]
+name = "calc_cli"
+description = "Stratify CLI application - Ratatui TUI based"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "calc_cli"
+path = "src/main.rs"
+
+[dependencies]
+calc_core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# TUI dependencies will be added when we implement the CLI
+# ratatui = { workspace = true }
+# crossterm = { workspace = true }

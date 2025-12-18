@@ -1,0 +1,31 @@
+[package]
+name = "calc_core"
+description = "Structural engineering calculation engine - LLM-friendly API"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+typst = { workspace = true }
+typst-pdf = { workspace = true }
+typst-assets = { workspace = true }
+comemo = "0.4"
+ecow = "0.2"
+
+# fs2 only on native targets (not WASM)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fs2 = { workspace = true }
+
+[dev-dependencies]
+# For testing
+
+[features]
+default = []
+# Future: schema export for LLM integration
+json-schema = []

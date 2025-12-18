@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(rustup show:*)",
+      "Bash(where:*)",
+      "Bash(rustup target add:*)",
+      "Bash(rustup default:*)",
+      "Bash(cargo clean:*)",
+      "Bash(dir 'C:\\Program Files\\Microsoft Visual Studio' /s /b)",
+      "Bash(findstr:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImplement Phase 1 & 2: Workspace setup and core data structures\n\n## Added\n- Rust workspace with calc_core (lib), calc_gui (bin), calc_cli (bin)\n- Core data structures: Project, ProjectMetadata, GlobalSettings\n- Type-safe unit wrappers (Feet, Inches, Kips, Psi, etc.)\n- Wood materials database with NDS 2018 values\n- Simply-supported beam calculation with:\n  - Moment, shear, deflection calculations\n  - NDS bending/shear stress checks\n  - Unity ratio reporting\n- Structured error types (CalcError) for LLM-friendly responses\n- Comprehensive unit tests for all modules\n- LLM API design section in README\n\n## Next TODO\n- Install Visual Studio Build Tools to fix linker issue\n- Run `cargo build` and `cargo test` to verify\n- Then proceed to Phase 3: File I/O and PDF generation\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(cargo test:*)",
+      "Bash(git commit:*)",
+      "Bash(cargo search:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo fix:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "Bash(ls -la \"C:\\Users\\hotschmoe\\Documents\\GitHub\\Stratify\\calc_core\\src\\calculations\"\" 2>/dev/null || ls -la \"C:UsershotschmoeDocumentsGitHubStratifycalc_coresrc\"\")",
+      "Bash(trunk:*)",
+      "Bash(cargo install:*)"
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "calc_core",
+    "calc_gui",
+    "calc_cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Stratify Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hotschmoe/Stratify"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID generation (js feature needed for WASM)
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+
+# File locking (for network drive safety) - native only, not WASM
+fs2 = "0.4"
+
+# Getrandom with js feature for WASM support
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Asset embedding
+rust-embed = "8.0"
+
+# PDF generation via Typst
+typst = "0.14"
+typst-pdf = "0.14"
+typst-assets = { version = "0.14", features = ["fonts"] }
+
+# GUI (Iced) - 0.14 has updated wgpu with WebGPU browser support
+iced = { version = "0.14", features = ["wgpu", "tokio", "canvas"] }
+
+# TUI (Ratatui)
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Internal crates
+calc_core = { path = "calc_core" }
+
+# Optimize dependencies in dev builds for better UI performance
+# (keeps your code unoptimized for fast compile times)
+[profile.dev.package."*"]
+opt-level = 3
