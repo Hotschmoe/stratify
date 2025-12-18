@@ -10,7 +10,7 @@ This document describes the GUI layout and component naming conventions for the 
 |  [New] [Open] [Save] [Save As]                              [Export PDF]          |
 +-----------------------------------------------------------------------------------+
 |          |                              |                                         |
-|  ITEMS   |         INPUT PANEL          |            PREVIEW PANEL                |
+|  ITEMS   |         INPUT PANEL          |            RESULTS PANEL                |
 |  PANEL   |                              |                                         |
 |          |                              |                                         |
 | +------+ | +-------------------------+  | +------------------------------------+  |
@@ -86,10 +86,18 @@ Shows different content based on selection:
 - Material section
   - Material type dropdown
   - Type-specific options (Species/Grade, Stress Class, etc.)
+- NDS Adjustment Factors section
+  - Load Duration (C_D)
+  - Wet Service (C_M)
+  - Repetitive Member (C_r)
+  - Temperature (C_t)
+  - Incising (C_i)
+  - Flat Use (C_fu)
+  - Compression edge braced checkbox (C_L)
 - Action buttons
-  - Update Beam / Delete
+  - Delete Beam
 
-### Preview Panel
+### Results Panel
 Location: Right side
 Purpose: Display calculation results and diagrams
 Contains:
@@ -125,10 +133,10 @@ Shows:
 2. **Editing Items**
    - Click item in Items Panel to select
    - Input Panel shows item's properties
-   - Changes update Preview Panel in real-time
+   - Changes update Results Panel in real-time
 
 3. **Live Preview**
-   - Preview Panel updates as you type
+   - Results Panel updates as you type
    - No "Calculate" button needed
    - Results show immediately with current input values
 

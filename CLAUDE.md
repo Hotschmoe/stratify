@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Stratify is a cross-platform structural engineering calculation suite written in Rust. It provides native desktop applications (Windows, macOS, Linux) and a WebAssembly-based web application for structural analysis, design, and PDF report generation.
 
-**Current Status**: Phase 2 complete. Working GUI with beam calculations, diagram rendering, PDF export, and file management. See `ROADMAP.md` for detailed progress.
+**Current Status**: Phase 3 in progress. NDS adjustment factors implemented with GUI. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
 
 ## Build Commands
 
@@ -17,13 +17,13 @@ cargo run --bin calc_gui
 # Build release
 cargo build --release --bin calc_gui
 
-# Run tests
+# Run tests (140 tests: 112 unit + 28 doc)
 cargo test
 
 # Build CLI (placeholder only)
 cargo run --bin calc_cli
 
-# Build WebAssembly (not yet tested)
+# Build WebAssembly (compiles, runtime issue documented)
 rustup target add wasm32-unknown-unknown
 trunk build --release
 ```
@@ -35,19 +35,37 @@ The project is a Rust workspace with three crates:
 ```
 stratify/
 ├── calc_core/           # [LIB] Pure Rust calculation engine
-│   ├── calculations/    # Beam, column, etc. calculation modules
-│   │   ├── beam.rs      # BeamInput, BeamResults, calculate_beam()
+│   ├── calculations/    # Beam, column calculation modules
+│   │   ├── beam.rs      # BeamInput, BeamResult, calculate()
 │   │   └── column.rs    # Placeholder
-│   ├── materials.rs     # WoodSpecies, WoodGrade, WoodProperties (NDS 2018)
-│   ├── units.rs         # Type-safe wrappers: Feet, Inches, Kips, Psi, etc.
-│   ├── project.rs       # Project, ProjectMetadata, GlobalSettings, CalculationItem
+│   ├── loads/           # Load handling
+│   │   ├── mod.rs       # LoadCase, DesignMethod (ASD/LRFD)
+│   │   ├── load_types.rs # LoadType enum (D, L, Lr, S, W, E, H)
+│   │   ├── discrete.rs  # DiscreteLoad, EnhancedLoadCase
+│   │   └── combinations.rs # ASCE 7 load combinations
+│   ├── materials/       # Material properties
+│   │   ├── mod.rs       # Material enum, unified interface
+│   │   ├── sawn_lumber.rs # WoodSpecies, WoodGrade, NDS Table 4A
+│   │   └── engineered_wood.rs # Glulam, LVL, PSL
+│   ├── nds_factors.rs   # NDS adjustment factors (C_D, C_M, C_t, etc.)
+│   ├── units.rs         # Type-safe wrappers: Feet, Inches, Kips, Psi
+│   ├── project.rs       # Project, ProjectMetadata, GlobalSettings
 │   ├── file_io.rs       # Atomic saves, FileLock with .lock files
 │   ├── pdf.rs           # Typst-based PDF generation
 │   └── errors.rs        # CalcError enum for structured errors
 ├── calc_gui/            # [BIN] Iced 0.13 GUI application
-│   └── main.rs          # ~1600 lines: toolbar, forms, canvas diagrams
+│   └── main.rs          # ~2400 lines (see GUI_LAYOUT.md for panel structure)
 └── calc_cli/            # [BIN] Placeholder CLI
 ```
+
+### GUI Panel Structure
+
+See `calc_gui/GUI_LAYOUT.md` for detailed layout. Main panels:
+- **Toolbar**: File operations (New, Open, Save, Export PDF)
+- **Items Panel** (left): Project navigation, beam list with [+] to create
+- **Input Panel** (center): Editor for selected item (beam properties, loads, material, adjustment factors)
+- **Results Panel** (right): Calculation results, diagrams (shear, moment, deflection)
+- **Status Bar**: File path, lock status, messages
 
 ### Key Architectural Principles
 
@@ -63,12 +81,18 @@ Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map 
 ```json
 {
   "meta": { "version": "0.1.0", "engineer": "Name", "job_id": "25-001", ... },
-  "settings": { "code": "IBC2021", "seismic_design_cat": "D", ... },
+  "settings": { "code": "IBC2024", "design_method": "Asd", ... },
   "items": {
     "uuid-here": {
-      "item_type": "Beam",
-      "label": "B-1",
-      "data": { "span_ft": 20.0, "tributary_width_ft": 12.0, ... }
+      "Beam": {
+        "label": "B-1",
+        "span_ft": 12.0,
+        "load_case": { "loads": [...], "include_self_weight": true },
+        "material": { "SawnLumber": { "species": "DouglasFirLarch", "grade": "No2" } },
+        "width_in": 1.5,
+        "depth_in": 9.25,
+        "adjustment_factors": { "load_duration": "Normal", "wet_service": "Dry", ... }
+      }
     }
   }
 }
@@ -77,19 +101,21 @@ Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map 
 ## Current Implementation
 
 ### What's Working
-- **Beam calculations**: Simply-supported with uniform load, NDS bending/shear/deflection checks
-- **Wood materials**: Species (DF-L, SP, HF, SPF, DF-S), grades (Sel Str through Utility), NDS 2018 Table 4A values
-- **PDF export**: Professional reports with Typst, pass/fail status, multi-beam export
-- **GUI**: Toolbar (New/Open/Save/Export), beam input form, results display, diagram canvas
-- **Diagrams**: Beam schematic, shear (V), moment (M), deflection (δ), support reactions
-- **File I/O**: Atomic saves, file locking, read-only mode for locked files
+- **Beam calculations**: Simply-supported with uniform/point loads, full NDS checks
+- **NDS adjustment factors**: C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r with GUI controls
+- **Load combinations**: ASCE 7 ASD (16 combos) and LRFD (7 combos), auto-governing
+- **Discrete loads**: Multiple loads per beam (D, L, Lr, S, W, E, H), point and uniform
+- **Wood materials**: Sawn lumber (5 species, 8 grades), Glulam, LVL, PSL
+- **PDF export**: Professional reports with Typst, multi-beam export
+- **GUI**: Live preview, auto-save, diagram rendering, file locking
+- **Diagrams**: Beam schematic with reactions, shear (V), moment (M), deflection (δ)
 
 ### What's Placeholder/Incomplete
 - Column calculations (stub only)
 - Steel and concrete materials
-- NDS adjustment factors (C_D, C_M, C_t, C_L, C_F, etc.)
-- Load combinations (ASCE 7)
+- Point load/partial uniform calculations in beam solver (UI ready, calc treats as uniform)
 - CLI interface (basic stdin demo only)
+- WASM runtime (compiles but canvas context conflict - documented in NEXT_TODO.md)
 
 ## Tech Stack
 
@@ -102,25 +128,25 @@ Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map 
 
 ## Engineering Context
 
-- US codes only: IBC 2012-2025, ASCE 7, NDS (wood), AISC 360 (steel), ACI 318 (concrete)
-- Current focus: NDS wood design (sawn lumber)
-- Next priority: Full NDS adjustment factors, then load combinations
+- US codes only: IBC 2024, ASCE 7, NDS 2018 (wood)
+- Current focus: Wood beam design at full depth
+- Future: Steel (AISC 360), concrete (ACI 318)
 
-### NDS Reference (Phase 3 Focus)
-Adjustment factors to implement:
-- C_D: Load duration (Table 2.3.2) - 0.9 to 2.0 based on load type
-- C_M: Wet service (Table 4A footnotes) - 0.85 typical for wet conditions
-- C_t: Temperature (Table 2.3.3) - 1.0 for T ≤ 100°F
-- C_L: Beam stability (3.3.3) - function of slenderness
-- C_F: Size factor (Table 4A) - varies by depth and width
-- C_fu: Flat use (Table 4A) - for members loaded on wide face
-- C_i: Incising (4.3.8) - 0.80 for incised lumber
-- C_r: Repetitive member (4.3.9) - 1.15 for joists/rafters/studs
+### NDS Adjustment Factors (Implemented)
+All factors in `calc_core/src/nds_factors.rs`:
+- C_D: Load duration (Permanent 0.9 → Impact 2.0)
+- C_M: Wet service (Dry 1.0, Wet 0.85-0.97)
+- C_t: Temperature (Normal 1.0, Elevated 0.7-0.8, High 0.5-0.7)
+- C_L: Beam stability (calculated from slenderness, or 1.0 if braced)
+- C_F: Size factor (from NDS Table 4A based on depth)
+- C_fu: Flat use factor
+- C_i: Incising factor (0.80-0.95 for incised lumber)
+- C_r: Repetitive member (1.15 for 3+ members at ≤24" OC)
 
 ## Design Decisions
 
-- **Target users**: Small teams (3-5) on desktop, individuals working on separate projects, files on NAS/Google Drive
+- **Target users**: Small teams (3-5) on desktop, files on NAS/Google Drive
 - **Offline-first**: No network connectivity required, no license checks
-- **Robust file locking**: Critical for NAS/cloud drive scenarios - handle stale locks, crashes, network drops
+- **Robust file locking**: Critical for NAS/cloud drive scenarios
 - **Rust edition**: 2021
-- **Keep it simple**: Avoid over-abstraction. Direct, readable code over clever patterns.
+- **Keep it simple**: Direct, readable code over clever patterns
