@@ -1344,26 +1344,31 @@ impl App {
 
     fn view_toolbar(&self) -> Element<'_, Message> {
         let file_buttons = row![
-            button("New (Ctrl+N)")
+            button(text("New").size(11))
                 .on_press(Message::NewProject)
-                .padding(Padding::from([6, 10])),
-            button("Open (Ctrl+O)")
+                .padding(Padding::from([4, 8]))
+                .style(button::secondary),
+            button(text("Open").size(11))
                 .on_press(Message::OpenProject)
-                .padding(Padding::from([6, 10])),
-            button("Save (Ctrl+S)")
+                .padding(Padding::from([4, 8]))
+                .style(button::secondary),
+            button(text("Save").size(11))
                 .on_press(Message::SaveProject)
-                .padding(Padding::from([6, 10])),
-            button("Save As")
+                .padding(Padding::from([4, 8]))
+                .style(button::secondary),
+            button(text("Save As").size(11))
                 .on_press(Message::SaveProjectAs)
-                .padding(Padding::from([6, 10])),
-            button("Export PDF")
+                .padding(Padding::from([4, 8]))
+                .style(button::secondary),
+            button(text("Export PDF").size(11))
                 .on_press(Message::ExportPdf)
-                .padding(Padding::from([6, 10])),
+                .padding(Padding::from([4, 8]))
+                .style(button::primary),
         ]
-        .spacing(6);
+        .spacing(4);
 
         row![file_buttons, horizontal_space(),]
-            .padding(Padding::from([8, 0]))
+            .padding(Padding::from([4, 0]))
             .into()
     }
 
