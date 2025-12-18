@@ -26,12 +26,13 @@ use calc_core::calculations::CalculationItem;
 use calc_core::file_io::{load_project, save_project, FileLock};
 use calc_core::loads::{DiscreteLoad, EnhancedLoadCase, LoadDistribution, LoadType};
 use calc_core::materials::{
-    GlulamLayup, GlulamMaterial, GlulamStressClass, LvlGrade, LvlMaterial, Material, PslGrade,
-    PslMaterial, WoodGrade, WoodMaterial, WoodSpecies,
+    GlulamLayup, GlulamMaterial, GlulamStressClass, LumberSize, LvlGrade, LvlMaterial, Material,
+    PlyCount, PslGrade, PslMaterial, WoodGrade, WoodMaterial, WoodSpecies,
 };
 use calc_core::nds_factors::{
     AdjustmentFactors, FlatUse, Incising, LoadDuration, RepetitiveMember, Temperature, WetService,
 };
+use calc_core::section_deductions::{NotchLocation, SectionDeductions};
 use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
 
@@ -118,6 +119,32 @@ pub enum EditorSelection {
     ProjectInfo,
     /// Editing a beam (existing or new)
     Beam(Option<Uuid>), // None = new beam, Some(id) = existing beam
+}
+
+/// A row in the span table (for multi-span beams)
+#[derive(Debug, Clone)]
+pub struct SpanTableRow {
+    pub id: Uuid,
+    pub length_ft: String,
+    pub left_support: SupportType,
+}
+
+impl SpanTableRow {
+    fn new() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            length_ft: "12.0".to_string(),
+            left_support: SupportType::Pinned,
+        }
+    }
+
+    fn from_span(span: &SpanSegment, support: SupportType) -> Self {
+        Self {
+            id: span.id,
+            length_ft: span.length_ft.to_string(),
+            left_support: support,
+        }
+    }
 }
 
 /// A row in the load table (editable UI state)
@@ -252,9 +279,14 @@ struct App {
 
     // Beam input fields (for editing)
     beam_label: String,
-    span_ft: String,
+    span_ft: String,  // Used for single-span mode (backwards compatible)
     width_in: String,
     depth_in: String,
+
+    // Multi-span configuration
+    span_table: Vec<SpanTableRow>,  // Spans with their left support types
+    right_end_support: SupportType,  // Support type at the right end of the beam
+    multi_span_mode: bool,  // Toggle between single-span and multi-span UI
 
     // Load table for multiple discrete loads
     load_table: Vec<LoadTableRow>,
@@ -265,6 +297,8 @@ struct App {
     // Sawn lumber
     selected_species: Option<WoodSpecies>,
     selected_grade: Option<WoodGrade>,
+    selected_lumber_size: LumberSize,
+    selected_ply_count: PlyCount,
     // Glulam
     selected_glulam_class: Option<GlulamStressClass>,
     selected_glulam_layup: Option<GlulamLayup>,
@@ -281,6 +315,13 @@ struct App {
     selected_repetitive_member: RepetitiveMember,
     selected_flat_use: FlatUse,
     compression_edge_braced: bool,
+
+    // Section deductions (notches, holes)
+    selected_notch_location: NotchLocation,
+    notch_depth_left: String,
+    notch_depth_right: String,
+    hole_diameter: String,
+    hole_count: String,
 
     // Calculation results (store input too for diagram plotting)
     calc_input: Option<ContinuousBeamInput>,
@@ -333,11 +374,20 @@ impl Default for App {
             span_ft: "12.0".to_string(),
             width_in: "1.5".to_string(),
             depth_in: "9.25".to_string(),
+            span_table: vec![SpanTableRow {
+                id: Uuid::new_v4(),
+                length_ft: "12.0".to_string(),
+                left_support: SupportType::Pinned,
+            }],
+            right_end_support: SupportType::Roller,
+            multi_span_mode: false,
             load_table: default_loads,
             include_self_weight: true,
             selected_material_type: MaterialType::SawnLumber,
             selected_species: Some(WoodSpecies::DouglasFirLarch),
             selected_grade: Some(WoodGrade::No2),
+            selected_lumber_size: LumberSize::L2x10,
+            selected_ply_count: PlyCount::Single,
             selected_glulam_class: Some(GlulamStressClass::F24_V4),
             selected_glulam_layup: Some(GlulamLayup::Unbalanced),
             selected_lvl_grade: Some(LvlGrade::Standard),
@@ -350,6 +400,11 @@ impl Default for App {
             selected_repetitive_member: RepetitiveMember::Single,
             selected_flat_use: FlatUse::Normal,
             compression_edge_braced: true,
+            selected_notch_location: NotchLocation::None,
+            notch_depth_left: String::new(),
+            notch_depth_right: String::new(),
+            hole_diameter: String::new(),
+            hole_count: String::new(),
             calc_input: None,
             result: None,
             error_message: None,
@@ -430,6 +485,14 @@ enum Message {
     WidthChanged(String),
     DepthChanged(String),
 
+    // Multi-span operations
+    ToggleMultiSpanMode,
+    AddSpan,
+    RemoveSpan(Uuid),
+    SpanLengthChanged(Uuid, String),
+    SpanLeftSupportChanged(Uuid, SupportType),
+    RightEndSupportChanged(SupportType),
+
     // Load table operations
     AddLoad,
     RemoveLoad(Uuid),
@@ -447,6 +510,8 @@ enum Message {
     // Sawn lumber
     SpeciesSelected(WoodSpecies),
     GradeSelected(WoodGrade),
+    LumberSizeSelected(LumberSize),
+    PlyCountSelected(PlyCount),
     // Glulam
     GlulamClassSelected(GlulamStressClass),
     GlulamLayupSelected(GlulamLayup),
@@ -463,6 +528,13 @@ enum Message {
     RepetitiveMemberSelected(RepetitiveMember),
     FlatUseSelected(FlatUse),
     CompressionBracedToggled(bool),
+
+    // Section Deductions
+    NotchLocationSelected(NotchLocation),
+    NotchDepthLeftChanged(String),
+    NotchDepthRightChanged(String),
+    HoleDiameterChanged(String),
+    HoleCountChanged(String),
 
     // Actions
     DeleteSelectedBeam,
@@ -618,6 +690,57 @@ impl App {
                 self.try_calculate();
             }
 
+            // Multi-span operations
+            Message::ToggleMultiSpanMode => {
+                self.multi_span_mode = !self.multi_span_mode;
+                // Sync span_ft with first span when toggling
+                if !self.multi_span_mode && !self.span_table.is_empty() {
+                    self.span_ft = self.span_table[0].length_ft.clone();
+                } else if self.multi_span_mode && !self.span_ft.is_empty() {
+                    if !self.span_table.is_empty() {
+                        self.span_table[0].length_ft = self.span_ft.clone();
+                    }
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::AddSpan => {
+                self.span_table.push(SpanTableRow::new());
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::RemoveSpan(id) => {
+                // Only allow removing if we have more than 1 span
+                if self.span_table.len() > 1 {
+                    self.span_table.retain(|s| s.id != id);
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::SpanLengthChanged(id, value) => {
+                if let Some(span) = self.span_table.iter_mut().find(|s| s.id == id) {
+                    span.length_ft = value;
+                }
+                // Also update span_ft if this is the first span
+                if !self.span_table.is_empty() && self.span_table[0].id == id {
+                    self.span_ft = self.span_table[0].length_ft.clone();
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::SpanLeftSupportChanged(id, support) => {
+                if let Some(span) = self.span_table.iter_mut().find(|s| s.id == id) {
+                    span.left_support = support;
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::RightEndSupportChanged(support) => {
+                self.right_end_support = support;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+
             // Load table operations - all trigger live preview update
             Message::AddLoad => {
                 self.load_table.push(LoadTableRow::new());
@@ -700,6 +823,30 @@ impl App {
                 self.auto_save_beam();
                 self.try_calculate();
             }
+            Message::LumberSizeSelected(size) => {
+                self.selected_lumber_size = size;
+                // Auto-fill width/depth from standard size (unless Custom)
+                if !size.is_custom() {
+                    let (w, d) = size.actual_dimensions();
+                    // For multi-ply, multiply width by ply count
+                    let total_width = w * self.selected_ply_count.count() as f64;
+                    self.width_in = format!("{:.2}", total_width);
+                    self.depth_in = format!("{:.2}", d);
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::PlyCountSelected(ply) => {
+                self.selected_ply_count = ply;
+                // Update width based on ply count (if not custom size)
+                if !self.selected_lumber_size.is_custom() {
+                    let (w, _) = self.selected_lumber_size.actual_dimensions();
+                    let total_width = w * ply.count() as f64;
+                    self.width_in = format!("{:.2}", total_width);
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
             Message::GlulamClassSelected(class) => {
                 self.selected_glulam_class = Some(class);
                 self.auto_save_beam();
@@ -754,6 +901,33 @@ impl App {
             }
             Message::CompressionBracedToggled(braced) => {
                 self.compression_edge_braced = braced;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+
+            // Section Deductions
+            Message::NotchLocationSelected(loc) => {
+                self.selected_notch_location = loc;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::NotchDepthLeftChanged(value) => {
+                self.notch_depth_left = value;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::NotchDepthRightChanged(value) => {
+                self.notch_depth_right = value;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::HoleDiameterChanged(value) => {
+                self.hole_diameter = value;
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::HoleCountChanged(value) => {
+                self.hole_count = value;
                 self.auto_save_beam();
                 self.try_calculate();
             }
@@ -955,6 +1129,28 @@ impl App {
                     self.width_in = first_span.width_in.to_string();
                     self.depth_in = first_span.depth_in.to_string();
 
+                    // Detect lumber size from actual dimensions
+                    // Try to find a matching standard size
+                    let single_ply_width = first_span.width_in;
+                    let depth = first_span.depth_in;
+
+                    // Check common ply counts
+                    let mut found_size = LumberSize::Custom;
+                    let mut found_ply = PlyCount::Single;
+
+                    for ply in &PlyCount::ALL {
+                        let ply_width = single_ply_width / ply.count() as f64;
+                        let detected = LumberSize::from_actual_dimensions(ply_width, depth);
+                        if !detected.is_custom() {
+                            found_size = detected;
+                            found_ply = *ply;
+                            break;
+                        }
+                    }
+
+                    self.selected_lumber_size = found_size;
+                    self.selected_ply_count = found_ply;
+
                     // Extract material-specific fields from first span
                     match &first_span.material {
                         Material::SawnLumber(wood) => {
@@ -995,6 +1191,37 @@ impl App {
                 self.selected_repetitive_member = beam.adjustment_factors.repetitive_member;
                 self.selected_flat_use = beam.adjustment_factors.flat_use;
                 self.compression_edge_braced = beam.adjustment_factors.compression_edge_braced;
+
+                // Populate span table from beam's spans and supports
+                self.multi_span_mode = beam.spans.len() > 1;
+                self.span_table = beam.spans.iter().zip(beam.supports.iter())
+                    .map(|(span, support)| SpanTableRow::from_span(span, *support))
+                    .collect();
+                // Right-end support is the last support in the list
+                self.right_end_support = beam.supports.last().copied().unwrap_or(SupportType::Roller);
+
+                // Extract section deductions
+                self.selected_notch_location = beam.section_deductions.notch_location;
+                self.notch_depth_left = if beam.section_deductions.notch_depth_left_in > 0.0 {
+                    beam.section_deductions.notch_depth_left_in.to_string()
+                } else {
+                    String::new()
+                };
+                self.notch_depth_right = if beam.section_deductions.notch_depth_right_in > 0.0 {
+                    beam.section_deductions.notch_depth_right_in.to_string()
+                } else {
+                    String::new()
+                };
+                self.hole_diameter = if beam.section_deductions.hole_diameter_in > 0.0 {
+                    beam.section_deductions.hole_diameter_in.to_string()
+                } else {
+                    String::new()
+                };
+                self.hole_count = if beam.section_deductions.hole_count > 0 {
+                    beam.section_deductions.hole_count.to_string()
+                } else {
+                    String::new()
+                };
 
                 self.error_message = None;
                 self.status = format!("Selected: {}", beam.label);
@@ -1164,16 +1391,65 @@ impl App {
             unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
         };
 
-        // Create ContinuousBeamInput with a single span
-        let mut beam = ContinuousBeamInput::simple_span(
-            self.beam_label.clone(),
-            span_ft,
-            width_in,
-            depth_in,
-            material,
-            load_case,
-        );
-        beam.adjustment_factors = adjustment_factors;
+        // Build beam - use multi-span or single-span based on mode
+        let beam = if self.multi_span_mode && self.span_table.len() > 1 {
+            // Build multi-span beam from span table
+            let mut spans = Vec::new();
+            let mut supports = Vec::new();
+
+            for (i, span_row) in self.span_table.iter().enumerate() {
+                // Parse span length
+                let span_len = match span_row.length_ft.parse::<f64>() {
+                    Ok(v) if v > 0.0 => v,
+                    _ => return, // Invalid span length
+                };
+
+                // Add left support for first span, or internal support for others
+                supports.push(span_row.left_support);
+
+                // Create span segment
+                let span = SpanSegment::new(span_len, width_in, depth_in, material.clone())
+                    .with_id(span_row.id);
+                spans.push(span);
+
+                // Add right-end support after the last span
+                if i == self.span_table.len() - 1 {
+                    supports.push(self.right_end_support);
+                }
+            }
+
+            let mut beam = ContinuousBeamInput::new(
+                self.beam_label.clone(),
+                spans,
+                supports,
+                load_case,
+            );
+            beam.adjustment_factors = adjustment_factors;
+            beam
+        } else {
+            // Create single-span beam
+            let mut beam = ContinuousBeamInput::simple_span(
+                self.beam_label.clone(),
+                span_ft,
+                width_in,
+                depth_in,
+                material,
+                load_case,
+            );
+            beam.adjustment_factors = adjustment_factors;
+            beam
+        };
+
+        // Build section deductions from UI state
+        let section_deductions = SectionDeductions {
+            notch_location: self.selected_notch_location,
+            notch_depth_left_in: self.notch_depth_left.parse().unwrap_or(0.0),
+            notch_depth_right_in: self.notch_depth_right.parse().unwrap_or(0.0),
+            hole_diameter_in: self.hole_diameter.parse().unwrap_or(0.0),
+            hole_count: self.hole_count.parse().unwrap_or(0),
+        };
+        let mut beam = beam;
+        beam.section_deductions = section_deductions;
 
         // Update the beam in the project
         self.project.items.insert(beam_id, CalculationItem::Beam(beam));
@@ -1289,16 +1565,69 @@ impl App {
             unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
         };
 
-        // Build ContinuousBeamInput with single span
-        let mut input = ContinuousBeamInput::simple_span(
-            self.beam_label.clone(),
-            span_ft,
-            width_in,
-            depth_in,
-            material,
-            load_case,
-        );
-        input.adjustment_factors = adjustment_factors;
+        // Build beam - use multi-span or single-span based on mode
+        let input = if self.multi_span_mode && self.span_table.len() > 1 {
+            // Build multi-span beam from span table
+            let mut spans = Vec::new();
+            let mut supports = Vec::new();
+
+            for (i, span_row) in self.span_table.iter().enumerate() {
+                // Parse span length
+                let span_len = match span_row.length_ft.parse::<f64>() {
+                    Ok(v) if v > 0.0 => v,
+                    _ => {
+                        self.result = None;
+                        self.calc_input = None;
+                        return;
+                    }
+                };
+
+                // Add left support for first span, or internal support for others
+                supports.push(span_row.left_support);
+
+                // Create span segment
+                let span = SpanSegment::new(span_len, width_in, depth_in, material.clone())
+                    .with_id(span_row.id);
+                spans.push(span);
+
+                // Add right-end support after the last span
+                if i == self.span_table.len() - 1 {
+                    supports.push(self.right_end_support);
+                }
+            }
+
+            let mut beam = ContinuousBeamInput::new(
+                self.beam_label.clone(),
+                spans,
+                supports,
+                load_case,
+            );
+            beam.adjustment_factors = adjustment_factors;
+            beam
+        } else {
+            // Create single-span beam
+            let mut beam = ContinuousBeamInput::simple_span(
+                self.beam_label.clone(),
+                span_ft,
+                width_in,
+                depth_in,
+                material,
+                load_case,
+            );
+            beam.adjustment_factors = adjustment_factors;
+            beam
+        };
+
+        // Build section deductions from UI state
+        let section_deductions = SectionDeductions {
+            notch_location: self.selected_notch_location,
+            notch_depth_left_in: self.notch_depth_left.parse().unwrap_or(0.0),
+            notch_depth_right_in: self.notch_depth_right.parse().unwrap_or(0.0),
+            hole_diameter_in: self.hole_diameter.parse().unwrap_or(0.0),
+            hole_count: self.hole_count.parse().unwrap_or(0),
+        };
+        let mut input = input;
+        input.section_deductions = section_deductions;
 
         // Run calculation
         let design_method = self.project.settings.design_method;
@@ -1688,13 +2017,91 @@ impl App {
             "New Beam"
         };
 
+        // Section dimensions - show size dropdown for sawn lumber
+        let section_inputs: Element<'_, Message> = if self.selected_material_type == MaterialType::SawnLumber {
+            // Sawn lumber gets standard size dropdown + ply count
+            let designation_text = if self.selected_ply_count == PlyCount::Single {
+                self.selected_lumber_size.display_name().to_string()
+            } else {
+                format!("{}{}", self.selected_ply_count.prefix(), self.selected_lumber_size.display_name())
+            };
+
+            column![
+                row![
+                    text("Size:").size(11).width(Length::Fixed(80.0)),
+                    pick_list(
+                        &LumberSize::ALL[..],
+                        Some(self.selected_lumber_size),
+                        Message::LumberSizeSelected
+                    )
+                    .width(Length::Fixed(80.0))
+                    .text_size(11),
+                    Space::new().width(8),
+                    text("Plies:").size(11),
+                    Space::new().width(4),
+                    pick_list(
+                        &PlyCount::ALL[..],
+                        Some(self.selected_ply_count),
+                        Message::PlyCountSelected
+                    )
+                    .width(Length::Fixed(110.0))
+                    .text_size(11),
+                ]
+                .align_y(Alignment::Center),
+                row![
+                    text("Actual:").size(10).width(Length::Fixed(80.0)).color([0.5, 0.5, 0.5]),
+                    text(format!("{} = {}\" x {}\"", designation_text, self.width_in, self.depth_in))
+                        .size(10)
+                        .color([0.5, 0.5, 0.5]),
+                ]
+                .align_y(Alignment::Center),
+                // Custom size inputs (only shown if custom is selected)
+                if self.selected_lumber_size.is_custom() {
+                    column![
+                        labeled_input("Width (in):", &self.width_in, Message::WidthChanged),
+                        labeled_input("Depth (in):", &self.depth_in, Message::DepthChanged),
+                    ]
+                    .spacing(6)
+                } else {
+                    column![]
+                },
+            ]
+            .spacing(4)
+            .into()
+        } else {
+            // Engineered wood uses manual width/depth inputs
+            column![
+                labeled_input("Width (in):", &self.width_in, Message::WidthChanged),
+                labeled_input("Depth (in):", &self.depth_in, Message::DepthChanged),
+            ]
+            .spacing(6)
+            .into()
+        };
+
+        // Span configuration section
+        let span_section: Element<'_, Message> = if self.multi_span_mode {
+            // Multi-span mode: show span table
+            self.view_span_table()
+        } else {
+            // Single-span mode: simple span input
+            labeled_input("Span (ft):", &self.span_ft, Message::SpanChanged)
+        };
+
+        let multi_span_toggle = checkbox(self.multi_span_mode)
+            .label("Multi-span beam")
+            .on_toggle(|_| Message::ToggleMultiSpanMode)
+            .text_size(11);
+
         let beam_section = column![
             text(editing_label).size(14),
             Space::new().height(8),
             labeled_input("Label:", &self.beam_label, Message::BeamLabelChanged),
-            labeled_input("Span (ft):", &self.span_ft, Message::SpanChanged),
-            labeled_input("Width (in):", &self.width_in, Message::WidthChanged),
-            labeled_input("Depth (in):", &self.depth_in, Message::DepthChanged),
+            Space::new().height(4),
+            multi_span_toggle,
+            Space::new().height(4),
+            span_section,
+            Space::new().height(4),
+            section_inputs,
         ]
         .spacing(6);
 
@@ -1785,6 +2192,9 @@ impl App {
         // NDS Adjustment Factors section
         let adjustment_factors_section = self.view_adjustment_factors();
 
+        // Section deductions (notches and holes)
+        let section_deductions_section = self.view_section_deductions();
+
         // Only show Delete button for existing beams
         let action_buttons = if self.selected_beam_id().is_some() {
             row![
@@ -1805,6 +2215,8 @@ impl App {
             material_section,
             Space::new().height(10),
             adjustment_factors_section,
+            Space::new().height(10),
+            section_deductions_section,
             Space::new().height(15),
             action_buttons,
         ]
@@ -1907,6 +2319,211 @@ impl App {
             other_factors,
             Space::new().height(6),
             bracing,
+        ]
+        .spacing(2)
+        .into()
+    }
+
+    fn view_section_deductions(&self) -> Element<'_, Message> {
+        // Notch location selector
+        let notch_row = row![
+            text("Notch:").size(10).width(Length::Fixed(60.0)),
+            pick_list(
+                &NotchLocation::ALL[..],
+                Some(self.selected_notch_location),
+                Message::NotchLocationSelected
+            )
+            .width(Length::Fill)
+            .text_size(10),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        // Notch depth inputs (shown only if notches are selected)
+        let notch_depths: Element<'_, Message> = match self.selected_notch_location {
+            NotchLocation::None => Space::new().height(0).into(),
+            NotchLocation::LeftSupport => {
+                row![
+                    text("Depth (in):").size(10).width(Length::Fixed(60.0)),
+                    text_input("0.0", &self.notch_depth_left)
+                        .on_input(Message::NotchDepthLeftChanged)
+                        .width(Length::Fixed(60.0))
+                        .padding(2)
+                        .size(10),
+                    text("left").size(10).color([0.5, 0.5, 0.5]),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .into()
+            }
+            NotchLocation::RightSupport => {
+                row![
+                    text("Depth (in):").size(10).width(Length::Fixed(60.0)),
+                    text_input("0.0", &self.notch_depth_right)
+                        .on_input(Message::NotchDepthRightChanged)
+                        .width(Length::Fixed(60.0))
+                        .padding(2)
+                        .size(10),
+                    text("right").size(10).color([0.5, 0.5, 0.5]),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .into()
+            }
+            NotchLocation::BothSupports => {
+                column![
+                    row![
+                        text("Left (in):").size(10).width(Length::Fixed(60.0)),
+                        text_input("0.0", &self.notch_depth_left)
+                            .on_input(Message::NotchDepthLeftChanged)
+                            .width(Length::Fixed(60.0))
+                            .padding(2)
+                            .size(10),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
+                    row![
+                        text("Right (in):").size(10).width(Length::Fixed(60.0)),
+                        text_input("0.0", &self.notch_depth_right)
+                            .on_input(Message::NotchDepthRightChanged)
+                            .width(Length::Fixed(60.0))
+                            .padding(2)
+                            .size(10),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(4)
+                .into()
+            }
+        };
+
+        // Holes section
+        let holes_row = row![
+            text("Holes:").size(10).width(Length::Fixed(60.0)),
+            text("Dia (in):").size(10),
+            text_input("0.0", &self.hole_diameter)
+                .on_input(Message::HoleDiameterChanged)
+                .width(Length::Fixed(50.0))
+                .padding(2)
+                .size(10),
+            Space::new().width(8),
+            text("Qty:").size(10),
+            text_input("0", &self.hole_count)
+                .on_input(Message::HoleCountChanged)
+                .width(Length::Fixed(40.0))
+                .padding(2)
+                .size(10),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        column![
+            text("Section Deductions").size(14),
+            Space::new().height(6),
+            notch_row,
+            notch_depths,
+            Space::new().height(4),
+            holes_row,
+        ]
+        .spacing(4)
+        .into()
+    }
+
+    fn view_span_table(&self) -> Element<'_, Message> {
+        // Header row
+        let header = row![
+            text("#").size(10).width(Length::Fixed(20.0)),
+            text("Length (ft)").size(10).width(Length::Fixed(80.0)),
+            text("Left Support").size(10).width(Length::Fixed(90.0)),
+            text("").size(10).width(Length::Fixed(30.0)), // Delete button column
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        // Build rows for each span
+        let mut span_rows: Column<'_, Message> = column![].spacing(4);
+
+        for (i, span_row) in self.span_table.iter().enumerate() {
+            let row_id = span_row.id;
+            let span_num = i + 1;
+
+            let num_label = text(format!("{}.", span_num)).size(10).width(Length::Fixed(20.0));
+
+            let length_input = text_input("12.0", &span_row.length_ft)
+                .on_input(move |s| Message::SpanLengthChanged(row_id, s))
+                .width(Length::Fixed(80.0))
+                .padding(2)
+                .size(10);
+
+            let support_picker = pick_list(
+                &SupportType::ALL[..],
+                Some(span_row.left_support),
+                move |st| Message::SpanLeftSupportChanged(row_id, st),
+            )
+            .width(Length::Fixed(90.0))
+            .text_size(10);
+
+            // Only show delete button if we have more than 1 span
+            let delete_btn: Element<'_, Message> = if self.span_table.len() > 1 {
+                button(text("X").size(10))
+                    .on_press(Message::RemoveSpan(row_id))
+                    .padding(Padding::from([2, 6]))
+                    .into()
+            } else {
+                Space::new().width(30).into()
+            };
+
+            let span_row_widget: Row<'_, Message> = row![
+                num_label,
+                length_input,
+                support_picker,
+                delete_btn,
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center);
+
+            span_rows = span_rows.push(span_row_widget);
+        }
+
+        // Right-end support row (after all spans)
+        let right_support_row = row![
+            text("End").size(10).width(Length::Fixed(20.0)),
+            Space::new().width(80),
+            pick_list(
+                &SupportType::ALL[..],
+                Some(self.right_end_support),
+                Message::RightEndSupportChanged,
+            )
+            .width(Length::Fixed(90.0))
+            .text_size(10),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        let add_span_btn = button(text("+ Add Span").size(10))
+            .on_press(Message::AddSpan)
+            .padding(Padding::from([4, 8]));
+
+        // Total length display
+        let total_length: f64 = self.span_table.iter()
+            .filter_map(|s| s.length_ft.parse::<f64>().ok())
+            .sum();
+
+        column![
+            text("Spans").size(12),
+            Space::new().height(4),
+            header,
+            rule::horizontal(1),
+            span_rows,
+            right_support_row,
+            Space::new().height(4),
+            row![
+                add_span_btn,
+                Space::new().width(Length::Fill),
+                text(format!("Total: {:.1} ft", total_length)).size(10),
+            ]
+            .align_y(Alignment::Center),
         ]
         .spacing(2)
         .into()
@@ -2295,14 +2912,16 @@ fn labeled_input<'a>(
 
 /// Data needed to draw beam diagrams
 struct BeamDiagramData {
-    span_ft: f64,
+    total_length_ft: f64,
     #[allow(dead_code)]
     load_plf: f64,
     max_shear_lb: f64,
-    reaction_left_lb: f64,
-    reaction_right_lb: f64,
     max_moment_ftlb: f64,
     max_deflection_in: f64,
+    // Multi-span support
+    span_lengths_ft: Vec<f64>,
+    support_types: Vec<SupportType>,
+    reactions: Vec<f64>,
     // Pre-computed diagram points from analysis
     shear_diagram: Vec<(f64, f64)>,
     moment_diagram: Vec<(f64, f64)>,
@@ -2311,25 +2930,35 @@ struct BeamDiagramData {
 
 impl BeamDiagramData {
     fn from_calc(input: &ContinuousBeamInput, result: &ContinuousBeamResult) -> Self {
-        // Get reactions from reactions vector
-        let (r_left, r_right) = if result.reactions.len() >= 2 {
-            (result.reactions[0], result.reactions[result.reactions.len() - 1])
-        } else {
-            (0.0, 0.0)
-        };
-
         Self {
-            span_ft: input.total_length_ft(),
+            total_length_ft: input.total_length_ft(),
             load_plf: input.load_case.total_uniform_plf(),
             max_shear_lb: result.max_shear_lb,
-            reaction_left_lb: r_left,
-            reaction_right_lb: r_right,
             max_moment_ftlb: result.max_positive_moment_ftlb,
             max_deflection_in: result.max_deflection_in,
+            span_lengths_ft: input.spans.iter().map(|s| s.length_ft).collect(),
+            support_types: input.supports.clone(),
+            reactions: result.reactions.clone(),
             shear_diagram: result.shear_diagram.clone(),
             moment_diagram: result.moment_diagram.clone(),
             deflection_diagram: result.deflection_diagram.clone(),
         }
+    }
+
+    /// Check if this is a multi-span beam
+    fn is_multi_span(&self) -> bool {
+        self.span_lengths_ft.len() > 1
+    }
+
+    /// Get node positions (cumulative span lengths starting from 0)
+    fn node_positions_ft(&self) -> Vec<f64> {
+        let mut positions = vec![0.0];
+        let mut cumulative = 0.0;
+        for len in &self.span_lengths_ft {
+            cumulative += len;
+            positions.push(cumulative);
+        }
+        positions
     }
 }
 
@@ -2420,8 +3049,11 @@ impl BeamDiagram {
         height: f32,
         color: Color,
     ) {
-        let beam_y = y + height * 0.6;
+        let beam_y = y + height * 0.55;
         let beam_thickness = 4.0;
+        let support_size = 10.0;
+        let total_length = self.data.total_length_ft;
+        let reaction_color = Color::from_rgb(0.7, 0.2, 0.2);
 
         // Draw beam line
         let beam = Path::line(
@@ -2430,29 +3062,72 @@ impl BeamDiagram {
         );
         frame.stroke(&beam, Stroke::default().with_color(color).with_width(beam_thickness));
 
-        // Draw pin support (left) - triangle
-        let support_size = 12.0;
-        let left_support = Path::new(|builder| {
-            builder.move_to(Point::new(x, beam_y + beam_thickness / 2.0));
-            builder.line_to(Point::new(x - support_size / 2.0, beam_y + support_size));
-            builder.line_to(Point::new(x + support_size / 2.0, beam_y + support_size));
-            builder.close();
-        });
-        frame.stroke(&left_support, Stroke::default().with_color(color).with_width(2.0));
+        // Get node positions
+        let node_positions = self.data.node_positions_ft();
 
-        // Draw roller support (right) - triangle with circle
-        let right_support = Path::new(|builder| {
-            builder.move_to(Point::new(x + width, beam_y + beam_thickness / 2.0));
-            builder.line_to(Point::new(x + width - support_size / 2.0, beam_y + support_size));
-            builder.line_to(Point::new(x + width + support_size / 2.0, beam_y + support_size));
-            builder.close();
-        });
-        frame.stroke(&right_support, Stroke::default().with_color(color).with_width(2.0));
+        // Draw supports at each node
+        for (i, &node_ft) in node_positions.iter().enumerate() {
+            let node_x = x + (node_ft / total_length) as f32 * width;
+            let support_type = self.data.support_types.get(i).copied().unwrap_or(SupportType::Pinned);
+
+            self.draw_support(frame, node_x, beam_y + beam_thickness / 2.0, support_size, support_type, color);
+
+            // Draw reaction arrow and label for supported nodes (not Free)
+            if support_type.restrains_vertical() {
+                let reaction = self.data.reactions.get(i).copied().unwrap_or(0.0);
+                if reaction.abs() > 1.0 {
+                    let reaction_arrow_length = height * 0.15;
+                    let reaction_start_y = beam_y + support_size + 8.0;
+
+                    // Draw reaction arrow (upward for positive, downward for negative)
+                    let (arrow_start, arrow_end) = if reaction >= 0.0 {
+                        (reaction_start_y + reaction_arrow_length, reaction_start_y)
+                    } else {
+                        (reaction_start_y, reaction_start_y + reaction_arrow_length)
+                    };
+
+                    let reaction_arrow = Path::line(
+                        Point::new(node_x, arrow_start),
+                        Point::new(node_x, arrow_end),
+                    );
+                    frame.stroke(
+                        &reaction_arrow,
+                        Stroke::default().with_color(reaction_color).with_width(2.0),
+                    );
+
+                    // Arrow head
+                    let head_y = arrow_end;
+                    let head_dir = if reaction >= 0.0 { 1.0 } else { -1.0 };
+                    let head = Path::new(|builder| {
+                        builder.move_to(Point::new(node_x, head_y));
+                        builder.line_to(Point::new(node_x - 3.0, head_y + head_dir * 6.0));
+                        builder.move_to(Point::new(node_x, head_y));
+                        builder.line_to(Point::new(node_x + 3.0, head_y + head_dir * 6.0));
+                    });
+                    frame.stroke(
+                        &head,
+                        Stroke::default().with_color(reaction_color).with_width(2.0),
+                    );
+
+                    // Reaction label - show R_1, R_2, etc.
+                    let label = format!("R_{} = {:.0}", i + 1, reaction.abs());
+                    let label_x = if i == 0 { node_x + 3.0 } else { node_x - 45.0 };
+                    let reaction_text = Text {
+                        content: label,
+                        position: Point::new(label_x, reaction_start_y + reaction_arrow_length + 2.0),
+                        color: reaction_color,
+                        size: iced::Pixels(8.0),
+                        ..Text::default()
+                    };
+                    frame.fill_text(reaction_text);
+                }
+            }
+        }
 
         // Draw uniform load arrows
-        let num_arrows = 8;
+        let num_arrows = 8.min((total_length * 2.0) as i32).max(4);
         let arrow_spacing = width / (num_arrows as f32);
-        let arrow_length = height * 0.25;
+        let arrow_length = height * 0.2;
 
         for i in 0..=num_arrows {
             let ax = x + i as f32 * arrow_spacing;
@@ -2460,105 +3135,114 @@ impl BeamDiagram {
                 Point::new(ax, beam_y - arrow_length),
                 Point::new(ax, beam_y - 5.0),
             );
-            frame.stroke(&arrow, Stroke::default().with_color(color).with_width(1.5));
+            frame.stroke(&arrow, Stroke::default().with_color(color).with_width(1.0));
 
             // Arrow head
             let head = Path::new(|builder| {
                 builder.move_to(Point::new(ax, beam_y - 5.0));
-                builder.line_to(Point::new(ax - 3.0, beam_y - 10.0));
+                builder.line_to(Point::new(ax - 2.0, beam_y - 9.0));
                 builder.move_to(Point::new(ax, beam_y - 5.0));
-                builder.line_to(Point::new(ax + 3.0, beam_y - 10.0));
+                builder.line_to(Point::new(ax + 2.0, beam_y - 9.0));
             });
-            frame.stroke(&head, Stroke::default().with_color(color).with_width(1.5));
+            frame.stroke(&head, Stroke::default().with_color(color).with_width(1.0));
         }
 
         // Load label
         let load_text = Text {
             content: format!("w = {:.0} plf", self.data.load_plf),
-            position: Point::new(x + width / 2.0, y + 8.0),
+            position: Point::new(x + width / 2.0, y + 5.0),
             color,
-            size: iced::Pixels(10.0),
+            size: iced::Pixels(9.0),
             align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(load_text);
 
-        // Span label
-        let span_text = Text {
-            content: format!("L = {:.1} ft", self.data.span_ft),
-            position: Point::new(x + width / 2.0, beam_y + support_size + 8.0),
-            color,
-            size: iced::Pixels(10.0),
-            align_x: iced::alignment::Horizontal::Center.into(),
-            ..Text::default()
-        };
-        frame.fill_text(span_text);
+        // Span labels - one for each span
+        for (i, span_len) in self.data.span_lengths_ft.iter().enumerate() {
+            let start = node_positions[i];
+            let end = node_positions[i + 1];
+            let mid = (start + end) / 2.0;
+            let span_x = x + (mid / total_length) as f32 * width;
 
-        // Reaction arrows (upward) at supports
-        let reaction_color = Color::from_rgb(0.7, 0.2, 0.2); // Red for reactions
-        let reaction_arrow_length = height * 0.2;
-        let reaction_start_y = beam_y + support_size + 5.0;
+            let span_text = Text {
+                content: format!("L{} = {:.1}'", i + 1, span_len),
+                position: Point::new(span_x, beam_y + support_size + 5.0),
+                color,
+                size: iced::Pixels(8.0),
+                align_x: iced::alignment::Horizontal::Center.into(),
+                ..Text::default()
+            };
+            frame.fill_text(span_text);
+        }
+    }
 
-        // Left reaction arrow (upward)
-        let left_reaction = Path::line(
-            Point::new(x, reaction_start_y + reaction_arrow_length),
-            Point::new(x, reaction_start_y),
-        );
-        frame.stroke(
-            &left_reaction,
-            Stroke::default().with_color(reaction_color).with_width(2.5),
-        );
-        // Arrow head pointing up
-        let left_head = Path::new(|builder| {
-            builder.move_to(Point::new(x, reaction_start_y));
-            builder.line_to(Point::new(x - 4.0, reaction_start_y + 8.0));
-            builder.move_to(Point::new(x, reaction_start_y));
-            builder.line_to(Point::new(x + 4.0, reaction_start_y + 8.0));
-        });
-        frame.stroke(
-            &left_head,
-            Stroke::default().with_color(reaction_color).with_width(2.5),
-        );
+    /// Draw a support symbol at the given position
+    fn draw_support(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        y: f32,
+        size: f32,
+        support_type: SupportType,
+        color: Color,
+    ) {
+        match support_type {
+            SupportType::Pinned => {
+                // Triangle (filled)
+                let support = Path::new(|builder| {
+                    builder.move_to(Point::new(x, y));
+                    builder.line_to(Point::new(x - size / 2.0, y + size));
+                    builder.line_to(Point::new(x + size / 2.0, y + size));
+                    builder.close();
+                });
+                frame.fill(&support, color);
+            }
+            SupportType::Roller => {
+                // Triangle with circle underneath
+                let triangle = Path::new(|builder| {
+                    builder.move_to(Point::new(x, y));
+                    builder.line_to(Point::new(x - size / 2.0, y + size * 0.7));
+                    builder.line_to(Point::new(x + size / 2.0, y + size * 0.7));
+                    builder.close();
+                });
+                frame.stroke(&triangle, Stroke::default().with_color(color).with_width(2.0));
 
-        // Right reaction arrow (upward)
-        let right_reaction = Path::line(
-            Point::new(x + width, reaction_start_y + reaction_arrow_length),
-            Point::new(x + width, reaction_start_y),
-        );
-        frame.stroke(
-            &right_reaction,
-            Stroke::default().with_color(reaction_color).with_width(2.5),
-        );
-        // Arrow head pointing up
-        let right_head = Path::new(|builder| {
-            builder.move_to(Point::new(x + width, reaction_start_y));
-            builder.line_to(Point::new(x + width - 4.0, reaction_start_y + 8.0));
-            builder.move_to(Point::new(x + width, reaction_start_y));
-            builder.line_to(Point::new(x + width + 4.0, reaction_start_y + 8.0));
-        });
-        frame.stroke(
-            &right_head,
-            Stroke::default().with_color(reaction_color).with_width(2.5),
-        );
+                // Circle
+                let circle_radius = size * 0.15;
+                let circle = Path::circle(Point::new(x, y + size * 0.7 + circle_radius + 1.0), circle_radius);
+                frame.stroke(&circle, Stroke::default().with_color(color).with_width(2.0));
+            }
+            SupportType::Fixed => {
+                // Filled rectangle with hatching
+                let rect_height = size;
+                let rect_width = size * 0.3;
 
-        // Reaction labels (show actual computed reactions)
-        let left_reaction_text = Text {
-            content: format!("R_L = {:.0} lb", self.data.reaction_left_lb),
-            position: Point::new(x + 5.0, reaction_start_y + reaction_arrow_length + 2.0),
-            color: reaction_color,
-            size: iced::Pixels(9.0),
-            ..Text::default()
-        };
-        frame.fill_text(left_reaction_text);
+                let rect = Path::new(|builder| {
+                    builder.move_to(Point::new(x - rect_width, y));
+                    builder.line_to(Point::new(x + rect_width, y));
+                    builder.line_to(Point::new(x + rect_width, y + rect_height));
+                    builder.line_to(Point::new(x - rect_width, y + rect_height));
+                    builder.close();
+                });
+                frame.fill(&rect, color);
 
-        let right_reaction_text = Text {
-            content: format!("R_R = {:.0} lb", self.data.reaction_right_lb),
-            position: Point::new(x + width - 60.0, reaction_start_y + reaction_arrow_length + 2.0),
-            color: reaction_color,
-            size: iced::Pixels(9.0),
-            ..Text::default()
-        };
-        frame.fill_text(right_reaction_text);
+                // Hatching lines
+                for i in 0..3 {
+                    let hatch_y = y + (i as f32 + 0.5) * rect_height / 3.0;
+                    let hatch = Path::line(
+                        Point::new(x - rect_width - 3.0, hatch_y + 3.0),
+                        Point::new(x + rect_width + 3.0, hatch_y - 3.0),
+                    );
+                    frame.stroke(&hatch, Stroke::default().with_color(color).with_width(1.0));
+                }
+            }
+            SupportType::Free => {
+                // No support symbol - maybe a small dot to show the end
+                let dot = Path::circle(Point::new(x, y + 2.0), 2.0);
+                frame.stroke(&dot, Stroke::default().with_color(color).with_width(1.5));
+            }
+        }
     }
 
     fn draw_shear_diagram(
@@ -2592,21 +3276,21 @@ impl BeamDiagram {
                 // Draw filled area
                 let shear_path = Path::new(|builder| {
                     let first = &self.data.shear_diagram[0];
-                    let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
                     let v_norm = first.1 / max_v;
                     let py = center_y - (v_norm as f32) * plot_height;
                     builder.move_to(Point::new(px, center_y));
                     builder.line_to(Point::new(px, py));
 
                     for (pos, v) in &self.data.shear_diagram {
-                        let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                        let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                         let v_norm = v / max_v;
                         let py = center_y - (v_norm as f32) * plot_height;
                         builder.line_to(Point::new(px, py));
                     }
 
                     let last = self.data.shear_diagram.last().unwrap();
-                    let px = x + (last.0 as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (last.0 as f32 / self.data.total_length_ft as f32) * width;
                     builder.line_to(Point::new(px, center_y));
                     builder.close();
                 });
@@ -2615,13 +3299,13 @@ impl BeamDiagram {
                 // Draw line
                 let shear_line = Path::new(|builder| {
                     let first = &self.data.shear_diagram[0];
-                    let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
                     let v_norm = first.1 / max_v;
                     let py = center_y - (v_norm as f32) * plot_height;
                     builder.move_to(Point::new(px, py));
 
                     for (pos, v) in &self.data.shear_diagram {
-                        let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                        let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                         let v_norm = v / max_v;
                         let py = center_y - (v_norm as f32) * plot_height;
                         builder.line_to(Point::new(px, py));
@@ -2688,7 +3372,7 @@ impl BeamDiagram {
             let moment_path = Path::new(|builder| {
                 builder.move_to(Point::new(x, axis_y));
                 for (pos, m) in &self.data.moment_diagram {
-                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                     let m_ratio = m / max_m;
                     let py = axis_y + (m_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
@@ -2701,13 +3385,13 @@ impl BeamDiagram {
             // Draw outline
             let outline = Path::new(|builder| {
                 let first = &self.data.moment_diagram[0];
-                let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
                 let m_ratio = first.1 / max_m;
                 let py = axis_y + (m_ratio as f32) * plot_height;
                 builder.move_to(Point::new(px, py));
 
                 for (pos, m) in &self.data.moment_diagram {
-                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                     let m_ratio = m / max_m;
                     let py = axis_y + (m_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
@@ -2764,13 +3448,13 @@ impl BeamDiagram {
             // Draw curve
             let defl_path = Path::new(|builder| {
                 let first = &self.data.deflection_diagram[0];
-                let px = x + (first.0 as f32 / self.data.span_ft as f32) * width;
+                let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
                 let d_ratio = first.1 / max_d;
                 let py = axis_y + (d_ratio as f32) * plot_height;
                 builder.move_to(Point::new(px, py));
 
                 for (pos, d) in &self.data.deflection_diagram {
-                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                     let d_ratio = d / max_d;
                     let py = axis_y + (d_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
@@ -2782,7 +3466,7 @@ impl BeamDiagram {
             let fill_path = Path::new(|builder| {
                 builder.move_to(Point::new(x, axis_y));
                 for (pos, d) in &self.data.deflection_diagram {
-                    let px = x + (*pos as f32 / self.data.span_ft as f32) * width;
+                    let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
                     let d_ratio = d / max_d;
                     let py = axis_y + (d_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));

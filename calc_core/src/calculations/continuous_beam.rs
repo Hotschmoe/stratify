@@ -49,6 +49,7 @@ use crate::errors::{CalcError, CalcResult};
 use crate::loads::EnhancedLoadCase;
 use crate::materials::Material;
 use crate::nds_factors::AdjustmentFactors;
+use crate::section_deductions::SectionDeductions;
 
 // =============================================================================
 // SUPPORT TYPE
@@ -185,6 +186,12 @@ impl SpanSegment {
     /// Create with a label
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = label.into();
+        self
+    }
+
+    /// Create with a specific UUID
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = id;
         self
     }
 
@@ -347,6 +354,10 @@ pub struct ContinuousBeamInput {
     /// NDS adjustment factors
     #[serde(default)]
     pub adjustment_factors: AdjustmentFactors,
+
+    /// Section deductions (notches, holes)
+    #[serde(default)]
+    pub section_deductions: SectionDeductions,
 }
 
 impl ContinuousBeamInput {
@@ -369,6 +380,7 @@ impl ContinuousBeamInput {
             supports: vec![SupportType::Pinned, SupportType::Roller],
             load_case,
             adjustment_factors: AdjustmentFactors::default(),
+            section_deductions: SectionDeductions::default(),
         }
     }
 
@@ -388,6 +400,7 @@ impl ContinuousBeamInput {
             supports: vec![SupportType::Fixed, SupportType::Free],
             load_case,
             adjustment_factors: AdjustmentFactors::default(),
+            section_deductions: SectionDeductions::default(),
         }
     }
 
@@ -407,6 +420,27 @@ impl ContinuousBeamInput {
             supports: vec![SupportType::Fixed, SupportType::Fixed],
             load_case,
             adjustment_factors: AdjustmentFactors::default(),
+            section_deductions: SectionDeductions::default(),
+        }
+    }
+
+    /// Create a multi-span beam with explicit spans and supports
+    ///
+    /// The supports vector must have length = spans.len() + 1
+    /// (one support at each node including both ends).
+    pub fn new(
+        label: impl Into<String>,
+        spans: Vec<SpanSegment>,
+        supports: Vec<SupportType>,
+        load_case: EnhancedLoadCase,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            spans,
+            supports,
+            load_case,
+            adjustment_factors: AdjustmentFactors::default(),
+            section_deductions: SectionDeductions::default(),
         }
     }
 
@@ -577,6 +611,7 @@ impl Default for ContinuousBeamInput {
             supports: vec![SupportType::Pinned, SupportType::Roller],
             load_case: EnhancedLoadCase::default(),
             adjustment_factors: AdjustmentFactors::default(),
+            section_deductions: SectionDeductions::default(),
         }
     }
 }

@@ -28,9 +28,13 @@
 
 pub mod sawn_lumber;
 pub mod engineered_wood;
+pub mod lumber_sizes;
 
 // Re-export sawn lumber types
 pub use sawn_lumber::{WoodSpecies, WoodGrade, WoodProperties, WoodMaterial};
+
+// Re-export lumber size types
+pub use lumber_sizes::{LumberSize, PlyCount, BeamDesignation};
 
 // Re-export engineered wood types
 pub use engineered_wood::{

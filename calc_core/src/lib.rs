@@ -45,6 +45,7 @@ pub mod materials;
 pub mod nds_factors;
 pub mod pdf;
 pub mod project;
+pub mod section_deductions;
 pub mod units;
 
 // Re-export commonly used types at crate root for convenience
@@ -55,3 +56,4 @@ pub use materials::Material;
 pub use nds_factors::{AdjustmentFactors, LoadDuration, WetService, RepetitiveMember};
 pub use pdf::render_beam_pdf;
 pub use project::{Project, ProjectMetadata, GlobalSettings};
+pub use section_deductions::{SectionDeductions, NotchLocation};
