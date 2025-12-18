@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::canvas;
-use iced::widget::{column, container, row, rule, Space, operation};
+use iced::widget::{column, container, row, rule, stack, Space, operation};
 use iced::{event, Element, Event, Font, Length, Subscription, Task, Theme};
 use uuid::Uuid;
 
@@ -1460,7 +1460,7 @@ impl App {
         let main_content = column![
             header,
             rule::horizontal(2),
-            ui::toolbar::view_toolbar(self.dark_mode, self.settings_menu_open),
+            ui::toolbar::view_toolbar(self.settings_menu_open),
             rule::horizontal(1),
             Space::new().height(10),
             content,
@@ -1475,9 +1475,39 @@ impl App {
         ]
         .padding(15);
 
-        container(main_content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        let mut root_stack = stack![
+            container(main_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ];
+
+        if self.settings_menu_open {
+            // Transparent overlay to catch clicks outside the menu
+            let backdrop = iced::widget::button(Space::new())
+                .on_press(Message::ToggleSettingsMenu)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|_, _| iced::widget::button::Style::default().with_background(iced::Color::TRANSPARENT));
+
+            // Position the dropdown in the top-right
+            // The padding should align with the toolbar settings button
+            // Toolbar is ~30px high + padding
+            // We'll use a container aligned to top-right with padding
+            let overlay = container(ui::toolbar::view_settings_menu(self.dark_mode))
+                .padding(iced::Padding {
+                    top: 50.0,
+                    right: 15.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Top)
+                .width(Length::Fill)
+                .height(Length::Fill);
+
+            root_stack = root_stack.push(backdrop).push(overlay);
+        }
+
+        root_stack.into()
     }
 }
