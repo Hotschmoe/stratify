@@ -2743,12 +2743,13 @@ impl App {
             })
             .unwrap_or(("N/A", 0.0));
 
-        // Get reactions (for single span: left and right reactions)
-        let (r_left, r_right) = if result.reactions.len() >= 2 {
-            (result.reactions[0], result.reactions[result.reactions.len() - 1])
-        } else {
-            (0.0, 0.0)
-        };
+        // Build reactions display string (R_1, R_2, R_3, etc.)
+        let reactions_str = result.reactions
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("R_{} = {:.0} lb", i + 1, r))
+            .collect::<Vec<_>>()
+            .join(", ");
 
         // Get section properties from input if available
         let (section_modulus, moment_inertia) = self.calc_input.as_ref()
@@ -2805,30 +2806,25 @@ impl App {
             .size(11),
             Space::new().height(12),
             text("Support Reactions").size(12),
-            text(format!(
-                "Max: R_L = {:.0} lb, R_R = {:.0} lb",
-                r_left, r_right
-            ))
-            .size(11),
+            text(format!("Max: {}", reactions_str)).size(11),
             text(format!("  ({})", result.governing_combination)).size(10),
             self.view_min_reactions(result),
         ]
     }
 
     fn view_min_reactions(&self, result: &ContinuousBeamResult) -> Element<'_, Message> {
-        let (min_r_left, min_r_right) = if result.min_reactions.len() >= 2 {
-            (result.min_reactions[0], result.min_reactions[result.min_reactions.len() - 1])
-        } else {
-            (0.0, 0.0)
-        };
+        // Build min reactions display string (R_1, R_2, R_3, etc.)
+        let min_reactions_str = result.min_reactions
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("R_{} = {:.0} lb", i + 1, r))
+            .collect::<Vec<_>>()
+            .join(", ");
 
-        let has_uplift = min_r_left < 0.0 || min_r_right < 0.0;
+        // Check for uplift at any reaction
+        let has_uplift = result.min_reactions.iter().any(|&r| r < 0.0);
 
-        let min_reactions_text = text(format!(
-            "Min: R_L = {:.0} lb, R_R = {:.0} lb",
-            min_r_left, min_r_right
-        ))
-        .size(11);
+        let min_reactions_text = text(format!("Min: {}", min_reactions_str)).size(11);
 
         let combo_text = text(format!("  ({})", result.min_reaction_combination)).size(10);
 
@@ -2837,10 +2833,18 @@ impl App {
                 .size(11)
                 .color([0.9, 0.5, 0.0]);
 
-            let uplift_value = min_r_left.min(min_r_right);
+            // Find the worst uplift value and its location
+            let (worst_idx, worst_value) = result.min_reactions
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, v)| (i + 1, *v))
+                .unwrap_or((1, 0.0));
+
             let uplift_detail = text(format!(
-                "Net uplift: {:.0} lb",
-                uplift_value.abs()
+                "Max uplift at R_{}: {:.0} lb",
+                worst_idx,
+                worst_value.abs()
             ))
             .size(10)
             .color([0.9, 0.5, 0.0]);
