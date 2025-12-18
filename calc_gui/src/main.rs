@@ -125,7 +125,9 @@ pub struct LoadTableRow {
     pub load_type: LoadType,
     pub distribution: DistributionType,
     pub magnitude: String,
-    pub position: String,      // For point loads: position in ft
+    pub position: String,       // For point loads: position in ft
+    pub start_ft: String,       // For partial uniform: start position
+    pub end_ft: String,         // For partial uniform: end position
     pub tributary_width: String, // Optional tributary width
 }
 
@@ -137,12 +139,14 @@ impl LoadTableRow {
             distribution: DistributionType::UniformFull,
             magnitude: "0.0".to_string(),
             position: "".to_string(),
+            start_ft: "0.0".to_string(),
+            end_ft: "".to_string(), // Will be set to span when used
             tributary_width: "".to_string(),
         }
     }
 
     /// Convert to DiscreteLoad
-    fn to_discrete_load(&self) -> Option<DiscreteLoad> {
+    fn to_discrete_load(&self, span_ft: f64) -> Option<DiscreteLoad> {
         let magnitude: f64 = self.magnitude.parse().ok()?;
         let tributary: Option<f64> = if self.tributary_width.is_empty() {
             None
@@ -155,13 +159,13 @@ impl LoadTableRow {
                 DiscreteLoad::uniform(self.load_type, magnitude)
             }
             DistributionType::Point => {
-                let pos: f64 = self.position.parse().ok()?;
+                let pos: f64 = self.position.parse().unwrap_or(span_ft / 2.0);
                 DiscreteLoad::point(self.load_type, magnitude, pos)
             }
             DistributionType::UniformPartial => {
-                // For partial uniform, position field is "start-end" format
-                // For simplicity, treat as full span for now
-                DiscreteLoad::uniform(self.load_type, magnitude)
+                let start: f64 = self.start_ft.parse().unwrap_or(0.0);
+                let end: f64 = self.end_ft.parse().unwrap_or(span_ft);
+                DiscreteLoad::partial_uniform(self.load_type, magnitude, start, end)
             }
         };
 
@@ -174,15 +178,17 @@ impl LoadTableRow {
 
     /// Create from DiscreteLoad
     fn from_discrete_load(load: &DiscreteLoad) -> Self {
-        let (distribution, position) = match &load.distribution {
-            LoadDistribution::UniformFull => (DistributionType::UniformFull, String::new()),
+        let (distribution, position, start_ft, end_ft) = match &load.distribution {
+            LoadDistribution::UniformFull => {
+                (DistributionType::UniformFull, String::new(), String::new(), String::new())
+            }
             LoadDistribution::Point { position_ft } => {
-                (DistributionType::Point, position_ft.to_string())
+                (DistributionType::Point, position_ft.to_string(), String::new(), String::new())
             }
             LoadDistribution::UniformPartial { start_ft, end_ft } => {
-                (DistributionType::UniformPartial, format!("{}-{}", start_ft, end_ft))
+                (DistributionType::UniformPartial, String::new(), start_ft.to_string(), end_ft.to_string())
             }
-            _ => (DistributionType::UniformFull, String::new()),
+            _ => (DistributionType::UniformFull, String::new(), String::new(), String::new()),
         };
 
         Self {
@@ -191,6 +197,8 @@ impl LoadTableRow {
             distribution,
             magnitude: load.magnitude.to_string(),
             position,
+            start_ft,
+            end_ft,
             tributary_width: load.tributary_width_ft
                 .map(|t| t.to_string())
                 .unwrap_or_default(),
@@ -280,6 +288,9 @@ struct App {
 
     // Status message
     status: String,
+
+    // Settings
+    dark_mode: bool,
 }
 
 impl Default for App {
@@ -292,6 +303,8 @@ impl Default for App {
                 distribution: DistributionType::UniformFull,
                 magnitude: "15.0".to_string(),
                 position: String::new(),
+                start_ft: "0.0".to_string(),
+                end_ft: String::new(),
                 tributary_width: String::new(),
             },
             LoadTableRow {
@@ -300,6 +313,8 @@ impl Default for App {
                 distribution: DistributionType::UniformFull,
                 magnitude: "40.0".to_string(),
                 position: String::new(),
+                start_ft: "0.0".to_string(),
+                end_ft: String::new(),
                 tributary_width: String::new(),
             },
         ];
@@ -338,6 +353,7 @@ impl Default for App {
             error_message: None,
             diagram_cache: canvas::Cache::default(),
             status: "Ready - New Project".to_string(),
+            dark_mode: false, // Default to light mode
         }
     }
 }
@@ -349,7 +365,11 @@ impl App {
 
     /// Get the application theme
     fn theme(&self) -> Theme {
-        Theme::Light
+        if self.dark_mode {
+            Theme::Dark
+        } else {
+            Theme::Light
+        }
     }
 
     /// Get window title with file name and modified indicator
@@ -415,6 +435,8 @@ enum Message {
     LoadDistributionChanged(Uuid, DistributionType),
     LoadMagnitudeChanged(Uuid, String),
     LoadPositionChanged(Uuid, String),
+    LoadStartChanged(Uuid, String),
+    LoadEndChanged(Uuid, String),
     LoadTributaryChanged(Uuid, String),
     IncludeSelfWeightToggled(bool),
 
@@ -450,6 +472,9 @@ enum Message {
     // Focus navigation (Tab / Shift+Tab)
     FocusNext,
     FocusPrevious,
+
+    // Settings
+    ToggleDarkMode,
 }
 
 // ============================================================================
@@ -630,6 +655,20 @@ impl App {
                 self.auto_save_beam();
                 self.try_calculate();
             }
+            Message::LoadStartChanged(id, value) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.start_ft = value;
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
+            Message::LoadEndChanged(id, value) => {
+                if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
+                    row.end_ft = value;
+                }
+                self.auto_save_beam();
+                self.try_calculate();
+            }
             Message::LoadTributaryChanged(id, value) => {
                 if let Some(row) = self.load_table.iter_mut().find(|r| r.id == id) {
                     row.tributary_width = value;
@@ -723,6 +762,12 @@ impl App {
             }
             Message::ExportPdf => {
                 self.export_pdf();
+            }
+
+            // Settings
+            Message::ToggleDarkMode => {
+                self.dark_mode = !self.dark_mode;
+                self.diagram_cache.clear(); // Redraw diagrams for new theme colors
             }
         }
         Task::none()
@@ -1092,7 +1137,7 @@ impl App {
         load_case.include_self_weight = self.include_self_weight;
 
         for row in &self.load_table {
-            if let Some(load) = row.to_discrete_load() {
+            if let Some(load) = row.to_discrete_load(span_ft) {
                 load_case = load_case.with_load(load);
             }
         }
@@ -1215,7 +1260,7 @@ impl App {
         load_case.include_self_weight = self.include_self_weight;
 
         for row in &self.load_table {
-            if let Some(load) = row.to_discrete_load() {
+            if let Some(load) = row.to_discrete_load(span_ft) {
                 load_case = load_case.with_load(load);
             }
         }
@@ -1395,9 +1440,26 @@ impl App {
         ]
         .spacing(4);
 
-        row![file_buttons, Space::new().width(Length::Fill),]
-            .padding(Padding::from([4, 0]))
-            .into()
+        // Settings section
+        let theme_icon = if self.dark_mode { "Light Mode" } else { "Dark Mode" };
+        let settings_buttons = row![
+            button(text(theme_icon).size(11))
+                .on_press(Message::ToggleDarkMode)
+                .padding(Padding::from([4, 8]))
+                .style(button::secondary),
+        ]
+        .spacing(4);
+
+        row![
+            file_buttons,
+            Space::new().width(Length::Fill),
+            text("Settings").size(11),
+            Space::new().width(8),
+            settings_buttons,
+        ]
+        .padding(Padding::from([4, 0]))
+        .align_y(Alignment::Center)
+        .into()
     }
 
     fn view_items_panel(&self) -> Element<'_, Message> {
@@ -1850,12 +1912,12 @@ impl App {
             .on_toggle(Message::IncludeSelfWeightToggled)
             .text_size(11);
 
-        // Header row
+        // Header row - Position column adapts to distribution type
         let header = row![
             text("Type").size(10).width(Length::Fixed(45.0)),
             text("Dist").size(10).width(Length::Fixed(60.0)),
             text("Mag").size(10).width(Length::Fixed(55.0)),
-            text("Pos").size(10).width(Length::Fixed(45.0)),
+            text("Position").size(10).width(Length::Fixed(70.0)),
             text("Trib").size(10).width(Length::Fixed(45.0)),
             text("").size(10).width(Length::Fixed(30.0)), // Delete button column
         ]
@@ -1890,12 +1952,42 @@ impl App {
                 .padding(2)
                 .size(10);
 
-            // Position input (only relevant for point loads)
-            let pos_input = text_input("", &load_row.position)
-                .on_input(move |s| Message::LoadPositionChanged(row_id, s))
-                .width(Length::Fixed(45.0))
-                .padding(2)
-                .size(10);
+            // Position input varies by distribution type
+            let pos_widget: Element<'_, Message> = match load_row.distribution {
+                DistributionType::UniformFull => {
+                    // No position needed for full uniform loads
+                    text("-").size(10).width(Length::Fixed(70.0)).into()
+                }
+                DistributionType::Point => {
+                    // Single position for point loads
+                    text_input("ft", &load_row.position)
+                        .on_input(move |s| Message::LoadPositionChanged(row_id, s))
+                        .width(Length::Fixed(70.0))
+                        .padding(2)
+                        .size(10)
+                        .into()
+                }
+                DistributionType::UniformPartial => {
+                    // Start and end for partial uniform loads
+                    row![
+                        text_input("0", &load_row.start_ft)
+                            .on_input(move |s| Message::LoadStartChanged(row_id, s))
+                            .width(Length::Fixed(32.0))
+                            .padding(2)
+                            .size(10),
+                        text("-").size(10),
+                        text_input("L", &load_row.end_ft)
+                            .on_input(move |s| Message::LoadEndChanged(row_id, s))
+                            .width(Length::Fixed(32.0))
+                            .padding(2)
+                            .size(10),
+                    ]
+                    .spacing(2)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fixed(70.0))
+                    .into()
+                }
+            };
 
             let trib_input = text_input("", &load_row.tributary_width)
                 .on_input(move |s| Message::LoadTributaryChanged(row_id, s))
@@ -1911,7 +2003,7 @@ impl App {
                 type_picker,
                 dist_picker,
                 mag_input,
-                pos_input,
+                pos_widget,
                 trib_input,
                 delete_btn,
             ]
@@ -2077,7 +2169,56 @@ impl App {
                 result.moment_of_inertia_in4
             ))
             .size(11),
+            Space::new().height(12),
+            text("Support Reactions").size(12),
+            text(format!(
+                "Max: R_L = {:.0} lb, R_R = {:.0} lb",
+                result.reaction_left_lb, result.reaction_right_lb
+            ))
+            .size(11),
+            text(format!("  ({})", result.governing_combination)).size(10),
+            self.view_min_reactions(result),
         ]
+    }
+
+    fn view_min_reactions(&self, result: &BeamResult) -> Element<'_, Message> {
+        let has_uplift = result.min_reaction_left_lb < 0.0 || result.min_reaction_right_lb < 0.0;
+
+        let min_reactions_text = text(format!(
+            "Min: R_L = {:.0} lb, R_R = {:.0} lb",
+            result.min_reaction_left_lb, result.min_reaction_right_lb
+        ))
+        .size(11);
+
+        let combo_text = text(format!("  ({})", result.min_reaction_combination)).size(10);
+
+        if has_uplift {
+            let uplift_warning = text("UPLIFT - Hold-downs required!")
+                .size(11)
+                .color([0.9, 0.5, 0.0]);
+
+            let uplift_value = result.min_reaction_left_lb.min(result.min_reaction_right_lb);
+            let uplift_detail = text(format!(
+                "Net uplift: {:.0} lb",
+                uplift_value.abs()
+            ))
+            .size(10)
+            .color([0.9, 0.5, 0.0]);
+
+            column![
+                min_reactions_text,
+                combo_text,
+                Space::new().height(4),
+                uplift_warning,
+                uplift_detail,
+            ]
+            .spacing(2)
+            .into()
+        } else {
+            column![min_reactions_text, combo_text,]
+                .spacing(2)
+                .into()
+        }
     }
 
     fn view_status_bar(&self) -> Element<'_, Message> {
@@ -2135,6 +2276,8 @@ struct BeamDiagramData {
     #[allow(dead_code)]
     load_plf: f64,
     max_shear_lb: f64,
+    reaction_left_lb: f64,
+    reaction_right_lb: f64,
     max_moment_ftlb: f64,
     max_deflection_in: f64,
     // Pre-computed diagram points from analysis
@@ -2149,6 +2292,8 @@ impl BeamDiagramData {
             span_ft: input.span_ft,
             load_plf: result.design_load_plf,
             max_shear_lb: result.max_shear_lb,
+            reaction_left_lb: result.reaction_left_lb,
+            reaction_right_lb: result.reaction_right_lb,
             max_moment_ftlb: result.max_moment_ftlb,
             max_deflection_in: result.max_deflection_in,
             shear_diagram: result.shear_diagram.clone(),
@@ -2366,9 +2511,9 @@ impl BeamDiagram {
             Stroke::default().with_color(reaction_color).with_width(2.5),
         );
 
-        // Reaction labels (R = wL/2 = max_shear)
+        // Reaction labels (show actual computed reactions)
         let left_reaction_text = Text {
-            content: format!("R = {:.0} lb", self.data.max_shear_lb),
+            content: format!("R_L = {:.0} lb", self.data.reaction_left_lb),
             position: Point::new(x + 5.0, reaction_start_y + reaction_arrow_length + 2.0),
             color: reaction_color,
             size: iced::Pixels(9.0),
@@ -2377,8 +2522,8 @@ impl BeamDiagram {
         frame.fill_text(left_reaction_text);
 
         let right_reaction_text = Text {
-            content: format!("R = {:.0} lb", self.data.max_shear_lb),
-            position: Point::new(x + width - 55.0, reaction_start_y + reaction_arrow_length + 2.0),
+            content: format!("R_R = {:.0} lb", self.data.reaction_right_lb),
+            position: Point::new(x + width - 60.0, reaction_start_y + reaction_arrow_length + 2.0),
             color: reaction_color,
             size: iced::Pixels(9.0),
             ..Text::default()
