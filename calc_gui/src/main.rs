@@ -11,6 +11,7 @@ use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, rule,
     scrollable, text, text_input, Column, Row, Space,
+    operation,
 };
 use iced::{
     event, Alignment, Color, Element, Event, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -445,6 +446,10 @@ enum Message {
 
     // Keyboard events
     KeyPressed(Key, Modifiers),
+
+    // Focus navigation (Tab / Shift+Tab)
+    FocusNext,
+    FocusPrevious,
 }
 
 // ============================================================================
@@ -455,6 +460,15 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         event::listen_with(|event, _status, _id| match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                // Handle Tab / Shift+Tab for focus navigation
+                if key == Key::Named(keyboard::key::Named::Tab) {
+                    if modifiers.shift() {
+                        return Some(Message::FocusPrevious);
+                    } else {
+                        return Some(Message::FocusNext);
+                    }
+                }
+                // Handle other keyboard shortcuts
                 Some(Message::KeyPressed(key, modifiers))
             }
             _ => None,
@@ -469,6 +483,14 @@ impl App {
 impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            // Focus navigation (Tab / Shift+Tab)
+            Message::FocusNext => {
+                return operation::focus_next();
+            }
+            Message::FocusPrevious => {
+                return operation::focus_previous();
+            }
+
             // Keyboard shortcuts
             Message::KeyPressed(key, modifiers) => {
                 if modifiers.control() {
