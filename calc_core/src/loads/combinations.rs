@@ -2,6 +2,16 @@
 //!
 //! This module provides standard load combinations per ASCE 7-22 for both
 //! Allowable Stress Design (ASD) and Load and Resistance Factor Design (LRFD).
+//!
+//! ## Wind Load Sign Convention
+//!
+//! Wind (W) is entered as a positive magnitude. The combinations include both
+//! +W (downward pressure) and -W (uplift) variants per ASCE 7-22 commentary:
+//! - +W: Wind pressure acting toward the structure (causes compression)
+//! - -W: Wind suction/uplift acting away from structure (causes tension)
+//!
+//! For gravity beam design, combinations with -W (uplift) may produce minimum
+//! reactions, which are critical for anchor/connection design.
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
@@ -139,35 +149,61 @@ pub fn asce7_asd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::Live, 0.75)
             .with_factor(LoadType::Rain, 0.75),
 
-        // 5a. D + 0.6W
+        // 5a. D + 0.6W (downward wind)
         LoadCombination::new("ASD-5a", "D + 0.6W")
             .with_factor(LoadType::Dead, 1.0)
             .with_factor(LoadType::Wind, 0.6),
+
+        // 5a'. D - 0.6W (wind uplift)
+        LoadCombination::new("ASD-5a'", "D - 0.6W")
+            .with_factor(LoadType::Dead, 1.0)
+            .with_factor(LoadType::Wind, -0.6),
 
         // 5b. D + 0.7E
         LoadCombination::new("ASD-5b", "D + 0.7E")
             .with_factor(LoadType::Dead, 1.0)
             .with_factor(LoadType::Seismic, 0.7),
 
-        // 6a. D + 0.75L + 0.75(0.6W) + 0.75Lr
+        // 6a. D + 0.75L + 0.75(0.6W) + 0.75Lr (downward wind)
         LoadCombination::new("ASD-6a", "D + 0.75L + 0.45W + 0.75Lr")
             .with_factor(LoadType::Dead, 1.0)
             .with_factor(LoadType::Live, 0.75)
             .with_factor(LoadType::Wind, 0.45) // 0.75 * 0.6
             .with_factor(LoadType::LiveRoof, 0.75),
 
-        // 6b. D + 0.75L + 0.75(0.6W) + 0.75S
+        // 6a'. D + 0.75L - 0.45W + 0.75Lr (wind uplift)
+        LoadCombination::new("ASD-6a'", "D + 0.75L - 0.45W + 0.75Lr")
+            .with_factor(LoadType::Dead, 1.0)
+            .with_factor(LoadType::Live, 0.75)
+            .with_factor(LoadType::Wind, -0.45)
+            .with_factor(LoadType::LiveRoof, 0.75),
+
+        // 6b. D + 0.75L + 0.75(0.6W) + 0.75S (downward wind)
         LoadCombination::new("ASD-6b", "D + 0.75L + 0.45W + 0.75S")
             .with_factor(LoadType::Dead, 1.0)
             .with_factor(LoadType::Live, 0.75)
             .with_factor(LoadType::Wind, 0.45)
             .with_factor(LoadType::Snow, 0.75),
 
-        // 6c. D + 0.75L + 0.75(0.6W) + 0.75R
+        // 6b'. D + 0.75L - 0.45W + 0.75S (wind uplift)
+        LoadCombination::new("ASD-6b'", "D + 0.75L - 0.45W + 0.75S")
+            .with_factor(LoadType::Dead, 1.0)
+            .with_factor(LoadType::Live, 0.75)
+            .with_factor(LoadType::Wind, -0.45)
+            .with_factor(LoadType::Snow, 0.75),
+
+        // 6c. D + 0.75L + 0.75(0.6W) + 0.75R (downward wind)
         LoadCombination::new("ASD-6c", "D + 0.75L + 0.45W + 0.75R")
             .with_factor(LoadType::Dead, 1.0)
             .with_factor(LoadType::Live, 0.75)
             .with_factor(LoadType::Wind, 0.45)
+            .with_factor(LoadType::Rain, 0.75),
+
+        // 6c'. D + 0.75L - 0.45W + 0.75R (wind uplift)
+        LoadCombination::new("ASD-6c'", "D + 0.75L - 0.45W + 0.75R")
+            .with_factor(LoadType::Dead, 1.0)
+            .with_factor(LoadType::Live, 0.75)
+            .with_factor(LoadType::Wind, -0.45)
             .with_factor(LoadType::Rain, 0.75),
 
         // 7. D + 0.75L + 0.75(0.7E) + 0.75S
@@ -177,10 +213,15 @@ pub fn asce7_asd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::Seismic, 0.525) // 0.75 * 0.7
             .with_factor(LoadType::Snow, 0.75),
 
-        // 8. 0.6D + 0.6W
+        // 8. 0.6D + 0.6W (downward wind)
         LoadCombination::new("ASD-8", "0.6D + 0.6W")
             .with_factor(LoadType::Dead, 0.6)
             .with_factor(LoadType::Wind, 0.6),
+
+        // 8'. 0.6D - 0.6W (wind uplift - critical for anchor design)
+        LoadCombination::new("ASD-8'", "0.6D - 0.6W")
+            .with_factor(LoadType::Dead, 0.6)
+            .with_factor(LoadType::Wind, -0.6),
 
         // 9. 0.6D + 0.7E
         LoadCombination::new("ASD-9", "0.6D + 0.7E")
@@ -233,11 +274,17 @@ pub fn asce7_lrfd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::LiveRoof, 1.6)
             .with_factor(LoadType::Live, 1.0),
 
-        // 3b. 1.2D + 1.6Lr + 0.5W
+        // 3b. 1.2D + 1.6Lr + 0.5W (downward wind)
         LoadCombination::new("LRFD-3b", "1.2D + 1.6Lr + 0.5W")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::LiveRoof, 1.6)
             .with_factor(LoadType::Wind, 0.5),
+
+        // 3b'. 1.2D + 1.6Lr - 0.5W (wind uplift)
+        LoadCombination::new("LRFD-3b'", "1.2D + 1.6Lr - 0.5W")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::LiveRoof, 1.6)
+            .with_factor(LoadType::Wind, -0.5),
 
         // 3c. 1.2D + 1.6S + L
         LoadCombination::new("LRFD-3c", "1.2D + 1.6S + L")
@@ -245,11 +292,17 @@ pub fn asce7_lrfd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::Snow, 1.6)
             .with_factor(LoadType::Live, 1.0),
 
-        // 3d. 1.2D + 1.6S + 0.5W
+        // 3d. 1.2D + 1.6S + 0.5W (downward wind)
         LoadCombination::new("LRFD-3d", "1.2D + 1.6S + 0.5W")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::Snow, 1.6)
             .with_factor(LoadType::Wind, 0.5),
+
+        // 3d'. 1.2D + 1.6S - 0.5W (wind uplift)
+        LoadCombination::new("LRFD-3d'", "1.2D + 1.6S - 0.5W")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::Snow, 1.6)
+            .with_factor(LoadType::Wind, -0.5),
 
         // 3e. 1.2D + 1.6R + L
         LoadCombination::new("LRFD-3e", "1.2D + 1.6R + L")
@@ -257,30 +310,57 @@ pub fn asce7_lrfd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::Rain, 1.6)
             .with_factor(LoadType::Live, 1.0),
 
-        // 3f. 1.2D + 1.6R + 0.5W
+        // 3f. 1.2D + 1.6R + 0.5W (downward wind)
         LoadCombination::new("LRFD-3f", "1.2D + 1.6R + 0.5W")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::Rain, 1.6)
             .with_factor(LoadType::Wind, 0.5),
 
-        // 4a. 1.2D + 1.0W + L + 0.5Lr
+        // 3f'. 1.2D + 1.6R - 0.5W (wind uplift)
+        LoadCombination::new("LRFD-3f'", "1.2D + 1.6R - 0.5W")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::Rain, 1.6)
+            .with_factor(LoadType::Wind, -0.5),
+
+        // 4a. 1.2D + 1.0W + L + 0.5Lr (downward wind)
         LoadCombination::new("LRFD-4a", "1.2D + 1.0W + L + 0.5Lr")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::Wind, 1.0)
             .with_factor(LoadType::Live, 1.0)
             .with_factor(LoadType::LiveRoof, 0.5),
 
-        // 4b. 1.2D + 1.0W + L + 0.5S
+        // 4a'. 1.2D - 1.0W + L + 0.5Lr (wind uplift)
+        LoadCombination::new("LRFD-4a'", "1.2D - 1.0W + L + 0.5Lr")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::Wind, -1.0)
+            .with_factor(LoadType::Live, 1.0)
+            .with_factor(LoadType::LiveRoof, 0.5),
+
+        // 4b. 1.2D + 1.0W + L + 0.5S (downward wind)
         LoadCombination::new("LRFD-4b", "1.2D + 1.0W + L + 0.5S")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::Wind, 1.0)
             .with_factor(LoadType::Live, 1.0)
             .with_factor(LoadType::Snow, 0.5),
 
-        // 4c. 1.2D + 1.0W + L + 0.5R
+        // 4b'. 1.2D - 1.0W + L + 0.5S (wind uplift)
+        LoadCombination::new("LRFD-4b'", "1.2D - 1.0W + L + 0.5S")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::Wind, -1.0)
+            .with_factor(LoadType::Live, 1.0)
+            .with_factor(LoadType::Snow, 0.5),
+
+        // 4c. 1.2D + 1.0W + L + 0.5R (downward wind)
         LoadCombination::new("LRFD-4c", "1.2D + 1.0W + L + 0.5R")
             .with_factor(LoadType::Dead, 1.2)
             .with_factor(LoadType::Wind, 1.0)
+            .with_factor(LoadType::Live, 1.0)
+            .with_factor(LoadType::Rain, 0.5),
+
+        // 4c'. 1.2D - 1.0W + L + 0.5R (wind uplift)
+        LoadCombination::new("LRFD-4c'", "1.2D - 1.0W + L + 0.5R")
+            .with_factor(LoadType::Dead, 1.2)
+            .with_factor(LoadType::Wind, -1.0)
             .with_factor(LoadType::Live, 1.0)
             .with_factor(LoadType::Rain, 0.5),
 
@@ -291,10 +371,15 @@ pub fn asce7_lrfd_combinations() -> Vec<LoadCombination> {
             .with_factor(LoadType::Live, 1.0)
             .with_factor(LoadType::Snow, 0.2),
 
-        // 6. 0.9D + 1.0W
+        // 6. 0.9D + 1.0W (downward wind)
         LoadCombination::new("LRFD-6", "0.9D + 1.0W")
             .with_factor(LoadType::Dead, 0.9)
             .with_factor(LoadType::Wind, 1.0),
+
+        // 6'. 0.9D - 1.0W (wind uplift - critical for anchor design)
+        LoadCombination::new("LRFD-6'", "0.9D - 1.0W")
+            .with_factor(LoadType::Dead, 0.9)
+            .with_factor(LoadType::Wind, -1.0),
 
         // 7. 0.9D + 1.0E
         LoadCombination::new("LRFD-7", "0.9D + 1.0E")
@@ -330,6 +415,94 @@ pub fn find_governing_combination(
         .unwrap_or((0.0, String::new()))
 }
 
+/// Find the minimum load combination result (critical for uplift)
+///
+/// Applies all combinations to the given load case and returns the minimum
+/// factored load along with the combination name. Negative values indicate
+/// net uplift (wind suction exceeds gravity loads).
+///
+/// # Example
+/// ```
+/// use calc_core::loads::{LoadCase, LoadType, asce7_asd_combinations, find_minimum_combination};
+///
+/// let case = LoadCase::new("Roof")
+///     .with_load(LoadType::Dead, 10.0)
+///     .with_load(LoadType::Wind, 30.0);  // Wind uplift
+///
+/// let (min_load, combo_name) = find_minimum_combination(&case, &asce7_asd_combinations());
+/// // ASD-8': 0.6D - 0.6W = 6 - 18 = -12 plf (net uplift!)
+/// assert!(min_load < 0.0, "Expected uplift with high wind");
+/// ```
+pub fn find_minimum_combination(
+    case: &LoadCase,
+    combinations: &[LoadCombination],
+) -> (f64, String) {
+    combinations
+        .iter()
+        .map(|combo| (combo.apply(case), combo.name.clone()))
+        .min_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or((0.0, String::new()))
+}
+
+/// Results from finding both max and min governing combinations
+#[derive(Debug, Clone)]
+pub struct GoverningResults {
+    /// Maximum factored load (governs for strength design)
+    pub max_load: f64,
+    /// Combination name for maximum load
+    pub max_combo: String,
+    /// Minimum factored load (governs for uplift/anchor design)
+    pub min_load: f64,
+    /// Combination name for minimum load
+    pub min_combo: String,
+}
+
+/// Find both maximum and minimum governing combinations
+///
+/// This is essential for complete design that considers both gravity (max)
+/// and uplift (min) conditions. Returns both in a single pass.
+///
+/// # Example
+/// ```
+/// use calc_core::loads::{LoadCase, LoadType, asce7_asd_combinations, find_governing_min_max};
+///
+/// let case = LoadCase::new("Roof")
+///     .with_load(LoadType::Dead, 15.0)
+///     .with_load(LoadType::Wind, 25.0);
+///
+/// let results = find_governing_min_max(&case, &asce7_asd_combinations());
+/// println!("Max: {:.1} plf ({})", results.max_load, results.max_combo);
+/// println!("Min: {:.1} plf ({})", results.min_load, results.min_combo);
+/// ```
+pub fn find_governing_min_max(
+    case: &LoadCase,
+    combinations: &[LoadCombination],
+) -> GoverningResults {
+    let mut max_load = f64::MIN;
+    let mut max_combo = String::new();
+    let mut min_load = f64::MAX;
+    let mut min_combo = String::new();
+
+    for combo in combinations {
+        let load = combo.apply(case);
+        if load > max_load {
+            max_load = load;
+            max_combo = combo.name.clone();
+        }
+        if load < min_load {
+            min_load = load;
+            min_combo = combo.name.clone();
+        }
+    }
+
+    GoverningResults {
+        max_load,
+        max_combo,
+        min_load,
+        min_combo,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,15 +510,15 @@ mod tests {
     #[test]
     fn test_asd_combination_count() {
         let combos = asce7_asd_combinations();
-        // 16 combinations (9 basic + alternates for Lr/S/R)
-        assert_eq!(combos.len(), 16);
+        // 21 combinations (16 basic + 5 wind uplift variants)
+        assert_eq!(combos.len(), 21);
     }
 
     #[test]
     fn test_lrfd_combination_count() {
         let combos = asce7_lrfd_combinations();
-        // 16 combinations (7 basic + alternates)
-        assert_eq!(combos.len(), 16);
+        // 23 combinations (16 basic + 7 wind uplift variants)
+        assert_eq!(combos.len(), 23);
     }
 
     #[test]
@@ -426,5 +599,69 @@ mod tests {
 
         // Should be 100 + 0 = 100
         assert_eq!(combo.apply(&case), 100.0);
+    }
+
+    #[test]
+    fn test_wind_uplift_asd() {
+        // Roof beam with light dead load and high wind
+        let case = LoadCase::new("Roof")
+            .with_load(LoadType::Dead, 10.0)  // 10 plf dead
+            .with_load(LoadType::Wind, 30.0);  // 30 plf wind (uplift)
+
+        let combos = asce7_asd_combinations();
+        let (min_load, name) = find_minimum_combination(&case, &combos);
+
+        // ASD-8': 0.6D - 0.6W = 0.6*10 - 0.6*30 = 6 - 18 = -12 plf
+        assert!((min_load - (-12.0)).abs() < 0.001, "min_load = {}", min_load);
+        assert_eq!(name, "ASD-8'");
+    }
+
+    #[test]
+    fn test_wind_uplift_lrfd() {
+        // Roof beam with light dead load and high wind
+        let case = LoadCase::new("Roof")
+            .with_load(LoadType::Dead, 10.0)  // 10 plf dead
+            .with_load(LoadType::Wind, 30.0);  // 30 plf wind (uplift)
+
+        let combos = asce7_lrfd_combinations();
+        let (min_load, name) = find_minimum_combination(&case, &combos);
+
+        // LRFD-6': 0.9D - 1.0W = 0.9*10 - 1.0*30 = 9 - 30 = -21 plf
+        assert!((min_load - (-21.0)).abs() < 0.001, "min_load = {}", min_load);
+        assert_eq!(name, "LRFD-6'");
+    }
+
+    #[test]
+    fn test_find_governing_min_max() {
+        // Test both max and min in one call
+        let case = LoadCase::new("Roof")
+            .with_load(LoadType::Dead, 15.0)
+            .with_load(LoadType::Live, 20.0)
+            .with_load(LoadType::Wind, 25.0);
+
+        let combos = asce7_asd_combinations();
+        let results = find_governing_min_max(&case, &combos);
+
+        // Max: ASD-6a = D + 0.75L + 0.45W = 15 + 15 + 11.25 = 41.25 plf
+        assert!((results.max_load - 41.25).abs() < 0.001, "max_load = {}", results.max_load);
+        assert!(results.max_combo.starts_with("ASD-6"), "max_combo = {}", results.max_combo);
+
+        // Min should be 0.6D - 0.6W = 9 - 15 = -6 plf
+        assert!((results.min_load - (-6.0)).abs() < 0.001, "min_load = {}", results.min_load);
+        assert_eq!(results.min_combo, "ASD-8'");
+    }
+
+    #[test]
+    fn test_no_uplift_when_dead_dominates() {
+        // Heavy structure where dead load prevents uplift
+        let case = LoadCase::new("Heavy Floor")
+            .with_load(LoadType::Dead, 100.0)
+            .with_load(LoadType::Wind, 20.0);
+
+        let combos = asce7_asd_combinations();
+        let (min_load, _) = find_minimum_combination(&case, &combos);
+
+        // 0.6D - 0.6W = 60 - 12 = 48 plf (still positive, no net uplift)
+        assert!(min_load > 0.0, "Expected no net uplift");
     }
 }

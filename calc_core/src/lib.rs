@@ -27,6 +27,7 @@
 //!
 //! - [`project`] - Project container, metadata, and settings
 //! - [`calculations`] - All structural calculation types (beams, columns, etc.)
+//! - [`equations`] - Documented statics formulas (beam, section properties)
 //! - [`materials`] - Material definitions and databases
 //! - [`loads`] - Load types and ASCE 7 load combinations
 //! - [`nds_factors`] - NDS adjustment factors (C_D, C_M, C_t, C_L, etc.)
@@ -36,6 +37,7 @@
 //! - [`pdf`] - PDF report generation with Typst
 
 pub mod calculations;
+pub mod equations;
 pub mod errors;
 pub mod file_io;
 pub mod loads;

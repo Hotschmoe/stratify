@@ -361,11 +361,22 @@ pub struct BeamResult {
     /// Summary of all NDS adjustment factors used in this calculation
     pub adjustment_factors: AdjustmentSummary,
 
-    // === Support Reactions ===
-    /// Left support reaction (lb) - positive upward
+    // === Support Reactions (Governing Max Combination) ===
+    /// Left support reaction (lb) - positive upward (from max governing combination)
     pub reaction_left_lb: f64,
-    /// Right support reaction (lb) - positive upward
+    /// Right support reaction (lb) - positive upward (from max governing combination)
     pub reaction_right_lb: f64,
+
+    // === Minimum Reactions (for Uplift/Anchor Design) ===
+    /// Minimum left reaction (lb) - may be negative for uplift
+    ///
+    /// From the load combination producing minimum reactions (e.g., 0.6D - 0.6W).
+    /// Negative values indicate net uplift requiring hold-down anchors.
+    pub min_reaction_left_lb: f64,
+    /// Minimum right reaction (lb) - may be negative for uplift
+    pub min_reaction_right_lb: f64,
+    /// Load combination name producing minimum reactions
+    pub min_reaction_combination: String,
 
     // === Diagram Data (for rendering) ===
     /// Shear diagram: Vec of (position_ft, shear_lb)
@@ -505,11 +516,18 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
     }
 
     // === Run Analysis for Each Load Combination ===
+    // Track both max (for strength design) and min (for uplift/anchor design)
     let combinations = method.combinations();
     let mut governing_moment = 0.0f64;
     let mut governing_combo_name = String::new();
     let mut governing_analysis: Option<super::beam_analysis::AnalysisResults> = None;
     let mut governing_total_plf = 0.0f64;
+
+    // Track minimum reactions for uplift design
+    let mut min_reaction_total = f64::MAX;
+    let mut min_reaction_combo_name = String::new();
+    let mut min_reaction_left = 0.0f64;
+    let mut min_reaction_right = 0.0f64;
 
     for combo in &combinations {
         // Create analysis with factored loads
@@ -550,12 +568,22 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
 
         let results = analysis.analyze();
 
-        // Check if this combination governs (based on maximum moment)
+        // Check if this combination governs for max moment (strength design)
         if results.max_moment_ftlb > governing_moment {
             governing_moment = results.max_moment_ftlb;
             governing_combo_name = combo.name.clone();
-            governing_analysis = Some(results);
+            governing_analysis = Some(results.clone());
             governing_total_plf = total_factored_plf;
+        }
+
+        // Check if this combination produces minimum reactions (uplift design)
+        // Use sum of reactions as the metric (could also use min of left/right)
+        let reaction_sum = results.reaction_left_lb + results.reaction_right_lb;
+        if reaction_sum < min_reaction_total {
+            min_reaction_total = reaction_sum;
+            min_reaction_combo_name = combo.name.clone();
+            min_reaction_left = results.reaction_left_lb;
+            min_reaction_right = results.reaction_right_lb;
         }
     }
 
@@ -678,9 +706,13 @@ pub fn calculate(input: &BeamInput, method: DesignMethod) -> CalcResult<BeamResu
         fv_reference_psi: props.fv_psi,
         e_psi: props.e_psi,
         adjustment_factors: adjustment_summary,
-        // Reactions from analysis
+        // Max reactions from governing (max moment) analysis
         reaction_left_lb: analysis_results.reaction_left_lb,
         reaction_right_lb: analysis_results.reaction_right_lb,
+        // Min reactions for uplift design
+        min_reaction_left_lb: min_reaction_left,
+        min_reaction_right_lb: min_reaction_right,
+        min_reaction_combination: min_reaction_combo_name,
         // Diagram data from analysis (scale deflection for adjusted E)
         shear_diagram: analysis_results.shear_diagram,
         moment_diagram: analysis_results.moment_diagram,
@@ -1081,5 +1113,95 @@ mod tests {
         // Last point should be at span
         let last_idx = result.shear_diagram.len() - 1;
         assert!((result.shear_diagram[last_idx].0 - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_wind_uplift_reactions() {
+        // Roof beam with light dead load and significant wind uplift
+        // D = 10 plf, W = 30 plf (entered positive, applied as uplift via -W combinations)
+        let load_case = EnhancedLoadCase::new("Roof with Wind")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 10.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Wind, 30.0));
+
+        let beam = BeamInput {
+            label: "Wind Uplift Beam".to_string(),
+            span_ft: 10.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
+        };
+
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // ASD-8': 0.6D - 0.6W = 0.6*10 - 0.6*30 = 6 - 18 = -12 plf total
+        // For symmetric simply-supported beam: R = wL/2 = -12 * 10 / 2 = -60 lb each
+        // Negative reaction indicates net uplift!
+
+        // Min reactions should be negative (uplift)
+        assert!(
+            result.min_reaction_left_lb < 0.0,
+            "Expected negative min reaction (uplift), got {} lb",
+            result.min_reaction_left_lb
+        );
+
+        // Min reaction combination should be ASD-8' (uplift combo)
+        assert!(
+            result.min_reaction_combination.contains("8'"),
+            "Expected ASD-8' for min reaction, got {}",
+            result.min_reaction_combination
+        );
+
+        // Min reactions should be approximately -60 lb each
+        let expected_min_reaction = -60.0; // -12 plf * 10 ft / 2
+        assert!(
+            (result.min_reaction_left_lb - expected_min_reaction).abs() < 5.0,
+            "Expected min reaction ~{} lb, got {} lb",
+            expected_min_reaction,
+            result.min_reaction_left_lb
+        );
+
+        // Max reactions should still be positive (gravity governs for strength)
+        assert!(
+            result.reaction_left_lb > 0.0,
+            "Expected positive max reaction, got {} lb",
+            result.reaction_left_lb
+        );
+    }
+
+    #[test]
+    fn test_no_uplift_when_dead_dominates() {
+        // Heavy beam where dead load prevents uplift even with wind
+        // D = 100 plf, W = 20 plf
+        let load_case = EnhancedLoadCase::new("Heavy Beam with Wind")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 100.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Wind, 20.0));
+
+        let beam = BeamInput {
+            label: "Heavy Beam".to_string(),
+            span_ft: 10.0,
+            load_case,
+            material: Material::SawnLumber(WoodMaterial::new(
+                WoodSpecies::DouglasFirLarch,
+                WoodGrade::No2,
+            )),
+            width_in: 1.5,
+            depth_in: 9.25,
+            adjustment_factors: AdjustmentFactors::default(),
+        };
+
+        let result = calculate(&beam, DesignMethod::Asd).unwrap();
+
+        // 0.6D - 0.6W = 60 - 12 = 48 plf (still positive)
+        // No net uplift, min reactions should be positive
+        assert!(
+            result.min_reaction_left_lb > 0.0,
+            "Expected positive min reaction (no uplift), got {} lb",
+            result.min_reaction_left_lb
+        );
     }
 }

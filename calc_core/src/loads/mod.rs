@@ -36,9 +36,12 @@ pub mod discrete;
 pub use load_types::LoadType;
 pub use combinations::{
     LoadCombination,
+    GoverningResults,
     asce7_asd_combinations,
     asce7_lrfd_combinations,
     find_governing_combination,
+    find_minimum_combination,
+    find_governing_min_max,
 };
 pub use discrete::{
     LoadDistribution,
