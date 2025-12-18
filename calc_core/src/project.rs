@@ -100,10 +100,9 @@ impl Project {
     ///
     /// ```rust
     /// use calc_core::project::Project;
-    /// use calc_core::calculations::{CalculationItem, BeamInput};
+    /// use calc_core::calculations::{CalculationItem, ContinuousBeamInput};
     /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
     /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
-    /// use calc_core::nds_factors::AdjustmentFactors;
     ///
     /// let mut project = Project::new("Engineer", "25-001", "Client");
     ///
@@ -111,15 +110,14 @@ impl Project {
     ///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
     ///     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
     ///
-    /// let beam = BeamInput {
-    ///     label: "B-1".to_string(),
-    ///     span_ft: 12.0,
+    /// let beam = ContinuousBeamInput::simple_span(
+    ///     "B-1",
+    ///     12.0,
+    ///     1.5,
+    ///     9.25,
+    ///     Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
     ///     load_case,
-    ///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
-    ///     width_in: 1.5,
-    ///     depth_in: 9.25,
-    ///     adjustment_factors: AdjustmentFactors::default(),
-    /// };
+    /// );
     ///
     /// let id = project.add_item(CalculationItem::Beam(beam));
     /// assert!(project.items.contains_key(&id));
@@ -314,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_add_remove_item() {
-        use crate::calculations::{BeamInput, CalculationItem};
+        use crate::calculations::{ContinuousBeamInput, CalculationItem};
         use crate::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
         use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
@@ -324,18 +322,17 @@ mod tests {
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
             .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 
-        let beam = BeamInput {
-            label: "B-1".to_string(),
-            span_ft: 12.0,
-            load_case,
-            material: Material::SawnLumber(WoodMaterial::new(
+        let beam = ContinuousBeamInput::simple_span(
+            "B-1",
+            12.0,
+            1.5,
+            9.25,
+            Material::SawnLumber(WoodMaterial::new(
                 WoodSpecies::DouglasFirLarch,
                 WoodGrade::No2,
             )),
-            width_in: 1.5,
-            depth_in: 9.25,
-            adjustment_factors: crate::nds_factors::AdjustmentFactors::default(),
-        };
+            load_case,
+        );
 
         let id = project.add_item(CalculationItem::Beam(beam));
         assert_eq!(project.item_count(), 1);

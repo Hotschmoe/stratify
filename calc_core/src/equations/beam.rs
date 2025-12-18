@@ -322,6 +322,326 @@ pub fn applied_moment_reactions(m0: f64, l: f64) -> (f64, f64) {
 }
 
 // =============================================================================
+// FIXED-END MOMENT (FEM) FORMULAS
+// Used for moment distribution in indeterminate beam analysis
+// =============================================================================
+
+/// Fixed-end moments for uniform load w over entire span L
+///
+/// ```text
+///     ▣═══════════════════▣
+///       ↓↓↓↓↓↓↓↓↓↓↓↓↓ w
+///    -M_A ←─────L─────→ M_B
+/// ```
+///
+/// # Formulas (Roark's Table 8.1, Case 2e)
+/// - FEM_A = -wL²/12 (negative = counterclockwise at left)
+/// - FEM_B = +wL²/12 (positive = clockwise at right)
+///
+/// # Returns
+/// (M_A, M_B) in same units as w×L² (e.g., ft-lb if w is plf and L is ft)
+#[inline]
+pub fn fem_uniform_full(w: f64, l: f64) -> (f64, f64) {
+    let fem = w * l * l / 12.0;
+    (-fem, fem)
+}
+
+/// Fixed-end moments for point load P at distance 'a' from left
+///
+/// ```text
+///     ▣════════P═════════▣
+///              ↓
+///    -M_A ←──a──┼──b──→ M_B
+///         ←────────L──────→
+/// ```
+///
+/// # Formulas (Roark's Table 8.1, Case 1e)
+/// - FEM_A = -Pab²/L²
+/// - FEM_B = +Pa²b/L²
+///
+/// where b = L - a
+#[inline]
+pub fn fem_point_load(p: f64, a: f64, l: f64) -> (f64, f64) {
+    let b = l - a;
+    let l2 = l * l;
+    let fem_a = -p * a * b * b / l2;
+    let fem_b = p * a * a * b / l2;
+    (fem_a, fem_b)
+}
+
+/// Fixed-end moments for partial uniform load w from 'a' to 'b'
+///
+/// Uses numerical integration by dividing load into point loads
+#[inline]
+pub fn fem_partial_uniform(w: f64, start: f64, end: f64, l: f64) -> (f64, f64) {
+    // Divide into 20 segments for accuracy
+    let num_segments = 20;
+    let segment_length = (end - start) / num_segments as f64;
+    let segment_load = w * segment_length;
+
+    let mut fem_a = 0.0;
+    let mut fem_b = 0.0;
+
+    for i in 0..num_segments {
+        let pos = start + (i as f64 + 0.5) * segment_length;
+        let (fa, fb) = fem_point_load(segment_load, pos, l);
+        fem_a += fa;
+        fem_b += fb;
+    }
+
+    (fem_a, fem_b)
+}
+
+// =============================================================================
+// FIXED-FIXED BEAM FORMULAS
+// Beam fixed at both ends
+// =============================================================================
+
+/// Reactions for fixed-fixed beam with uniform load
+///
+/// # Formula
+/// R_A = R_B = wL/2 (same as simply-supported for symmetric load)
+#[inline]
+pub fn fixed_fixed_uniform_reactions(w: f64, l: f64) -> (f64, f64) {
+    let r = w * l / 2.0;
+    (r, r)
+}
+
+/// End moments for fixed-fixed beam with uniform load
+///
+/// # Formulas (Roark's Table 8.1, Case 2e)
+/// - M_A = M_B = wL²/12 (magnitude, signs are negative = hogging)
+///
+/// # Returns
+/// (M_A, M_B) both positive values representing hogging moment magnitude
+#[inline]
+pub fn fixed_fixed_uniform_end_moments(w: f64, l: f64) -> (f64, f64) {
+    let m = w * l * l / 12.0;
+    (m, m)
+}
+
+/// Maximum positive moment for fixed-fixed beam with uniform load
+///
+/// # Formula
+/// M_max = wL²/24 at midspan (sagging)
+#[inline]
+pub fn fixed_fixed_uniform_max_positive_moment(w: f64, l: f64) -> f64 {
+    w * l * l / 24.0
+}
+
+/// Moment at position x for fixed-fixed beam with uniform load
+///
+/// # Formula
+/// M(x) = -wL²/12 + wLx/2 - wx²/2
+///      = w(6Lx - L² - 6x²)/12
+#[inline]
+pub fn fixed_fixed_uniform_moment(w: f64, l: f64, x: f64) -> f64 {
+    w * (6.0 * l * x - l * l - 6.0 * x * x) / 12.0
+}
+
+/// Shear at position x for fixed-fixed beam with uniform load
+///
+/// # Formula
+/// V(x) = wL/2 - wx (same as simply-supported for symmetric load)
+#[inline]
+pub fn fixed_fixed_uniform_shear(w: f64, l: f64, x: f64) -> f64 {
+    w * (l / 2.0 - x)
+}
+
+/// Deflection at position x for fixed-fixed beam with uniform load
+///
+/// # Formula (Roark's Table 8.1, Case 2e)
+/// δ(x) = wx²(L-x)² / (24EI)
+#[inline]
+pub fn fixed_fixed_uniform_deflection(w: f64, l: f64, x: f64, e: f64, i: f64) -> f64 {
+    w * x * x * (l - x) * (l - x) / (24.0 * e * i)
+}
+
+/// Maximum deflection for fixed-fixed beam with uniform load
+///
+/// # Formula
+/// δ_max = wL⁴/(384EI) at midspan
+#[inline]
+pub fn fixed_fixed_uniform_max_deflection(w: f64, l: f64, e: f64, i: f64) -> f64 {
+    w * l.powi(4) / (384.0 * e * i)
+}
+
+/// Reactions for fixed-fixed beam with point load at position a
+///
+/// # Formulas (Roark's Table 8.1, Case 1e)
+/// R_A = Pb²(3a + b)/L³
+/// R_B = Pa²(a + 3b)/L³
+/// where b = L - a
+#[inline]
+pub fn fixed_fixed_point_reactions(p: f64, a: f64, l: f64) -> (f64, f64) {
+    let b = l - a;
+    let l3 = l * l * l;
+    let r_a = p * b * b * (3.0 * a + b) / l3;
+    let r_b = p * a * a * (a + 3.0 * b) / l3;
+    (r_a, r_b)
+}
+
+/// End moments for fixed-fixed beam with point load at position a
+///
+/// # Formulas (Roark's Table 8.1, Case 1e)
+/// M_A = Pab²/L² (hogging at left support)
+/// M_B = Pa²b/L² (hogging at right support)
+#[inline]
+pub fn fixed_fixed_point_end_moments(p: f64, a: f64, l: f64) -> (f64, f64) {
+    let b = l - a;
+    let l2 = l * l;
+    let m_a = p * a * b * b / l2;
+    let m_b = p * a * a * b / l2;
+    (m_a, m_b)
+}
+
+// =============================================================================
+// CANTILEVER BEAM FORMULAS
+// Fixed at one end (A), free at other (B)
+// =============================================================================
+
+/// Reaction and moment at fixed end for cantilever with uniform load
+///
+/// # Formulas
+/// R_A = wL (total load)
+/// M_A = wL²/2 (hogging moment at support)
+///
+/// # Returns
+/// (R_A, M_A)
+#[inline]
+pub fn cantilever_uniform_reactions(w: f64, l: f64) -> (f64, f64) {
+    let r = w * l;
+    let m = w * l * l / 2.0;
+    (r, m)
+}
+
+/// Shear at position x for cantilever with uniform load (fixed at left)
+///
+/// # Formula
+/// V(x) = w(L - x)
+#[inline]
+pub fn cantilever_uniform_shear(w: f64, l: f64, x: f64) -> f64 {
+    w * (l - x)
+}
+
+/// Moment at position x for cantilever with uniform load (fixed at left)
+///
+/// # Formula
+/// M(x) = -w(L-x)²/2
+///
+/// Negative because causes tension on top (hogging).
+/// At x=0: M = -wL²/2
+/// At x=L: M = 0
+#[inline]
+pub fn cantilever_uniform_moment(w: f64, l: f64, x: f64) -> f64 {
+    -w * (l - x) * (l - x) / 2.0
+}
+
+/// Deflection at position x for cantilever with uniform load (fixed at left)
+///
+/// # Formula (Roark's Table 8.1, Case 2b)
+/// δ(x) = wx²(6L² - 4Lx + x²) / (24EI)
+#[inline]
+pub fn cantilever_uniform_deflection(w: f64, l: f64, x: f64, e: f64, i: f64) -> f64 {
+    w * x * x * (6.0 * l * l - 4.0 * l * x + x * x) / (24.0 * e * i)
+}
+
+/// Maximum deflection for cantilever with uniform load (at free end)
+///
+/// # Formula
+/// δ_max = wL⁴/(8EI)
+#[inline]
+pub fn cantilever_uniform_max_deflection(w: f64, l: f64, e: f64, i: f64) -> f64 {
+    w * l.powi(4) / (8.0 * e * i)
+}
+
+/// Reaction and moment at fixed end for cantilever with point load at distance a
+///
+/// # Formulas
+/// R_A = P
+/// M_A = Pa (moment = force × distance from support)
+///
+/// # Returns
+/// (R_A, M_A)
+#[inline]
+pub fn cantilever_point_reactions(p: f64, a: f64) -> (f64, f64) {
+    (p, p * a)
+}
+
+/// Moment at position x for cantilever with point load at distance a (fixed at left)
+///
+/// # Formula
+/// M(x) = -P(a-x) for x < a
+/// M(x) = 0       for x >= a
+#[inline]
+pub fn cantilever_point_moment(p: f64, a: f64, x: f64) -> f64 {
+    if x < a {
+        -p * (a - x)
+    } else {
+        0.0
+    }
+}
+
+/// Deflection at position x for cantilever with point load at distance a
+///
+/// # Formulas (Roark's Table 8.1, Case 1b)
+/// For x ≤ a: δ(x) = Px²(3a - x) / (6EI)
+/// For x > a: δ(x) = Pa²(3x - a) / (6EI)
+#[inline]
+pub fn cantilever_point_deflection(p: f64, a: f64, x: f64, e: f64, i: f64) -> f64 {
+    if x <= a {
+        p * x * x * (3.0 * a - x) / (6.0 * e * i)
+    } else {
+        p * a * a * (3.0 * x - a) / (6.0 * e * i)
+    }
+}
+
+// =============================================================================
+// PROPPED CANTILEVER (FIXED-PINNED) FORMULAS
+// Fixed at left (A), pinned at right (B)
+// =============================================================================
+
+/// Reactions for propped cantilever with uniform load
+///
+/// # Formulas (Roark's Table 8.1)
+/// R_A = 5wL/8
+/// R_B = 3wL/8
+/// M_A = wL²/8 (fixed end moment)
+#[inline]
+pub fn fixed_pinned_uniform_reactions(w: f64, l: f64) -> (f64, f64, f64) {
+    let r_a = 5.0 * w * l / 8.0;
+    let r_b = 3.0 * w * l / 8.0;
+    let m_a = w * l * l / 8.0;
+    (r_a, r_b, m_a)
+}
+
+/// Moment at position x for propped cantilever with uniform load
+///
+/// # Formula
+/// M(x) = R_A·x - M_A - wx²/2
+///      = 5wLx/8 - wL²/8 - wx²/2
+#[inline]
+pub fn fixed_pinned_uniform_moment(w: f64, l: f64, x: f64) -> f64 {
+    5.0 * w * l * x / 8.0 - w * l * l / 8.0 - w * x * x / 2.0
+}
+
+/// Maximum positive moment for propped cantilever with uniform load
+///
+/// Occurs at x = 5L/8 - sqrt(x²) where V=0
+/// x_max = 5L/8
+/// M_max = 9wL²/128
+#[inline]
+pub fn fixed_pinned_uniform_max_positive_moment(w: f64, l: f64) -> f64 {
+    9.0 * w * l * l / 128.0
+}
+
+/// Position of max positive moment for propped cantilever
+#[inline]
+pub fn fixed_pinned_uniform_max_moment_position(l: f64) -> f64 {
+    3.0 * l / 8.0 // Where shear = 0
+}
+
+// =============================================================================
 // UNIT TESTS
 // =============================================================================
 
@@ -333,6 +653,10 @@ mod tests {
 
     fn approx_eq(a: f64, b: f64) -> bool {
         (a - b).abs() < EPSILON || (a - b).abs() / b.abs().max(1.0) < 0.001
+    }
+
+    fn approx_eq_tolerance(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() < tol || (a - b).abs() / b.abs().max(1.0) < tol
     }
 
     // Point load tests
@@ -436,5 +760,231 @@ mod tests {
         // Total: R1 = R2 = 500
         assert!(approx_eq(r1_total, 500.0), "R1_total = {}", r1_total);
         assert!(approx_eq(r2_total, 500.0), "R2_total = {}", r2_total);
+    }
+
+    // =======================================================================
+    // FIXED-END MOMENT TESTS
+    // =======================================================================
+
+    #[test]
+    fn test_fem_uniform_full() {
+        // 10 ft beam, 100 plf
+        // FEM = wL²/12 = 100 * 100 / 12 = 833.33 ft-lb
+        let (fem_a, fem_b) = fem_uniform_full(100.0, 10.0);
+        assert!(
+            approx_eq_tolerance(fem_a.abs(), 833.33, 1.0),
+            "FEM_A = {} (expected -833.33)",
+            fem_a
+        );
+        assert!(
+            approx_eq_tolerance(fem_b.abs(), 833.33, 1.0),
+            "FEM_B = {} (expected +833.33)",
+            fem_b
+        );
+        // Signs: A is negative (counterclockwise), B is positive (clockwise)
+        assert!(fem_a < 0.0, "FEM_A should be negative");
+        assert!(fem_b > 0.0, "FEM_B should be positive");
+    }
+
+    #[test]
+    fn test_fem_point_load_midspan() {
+        // 10 ft beam, 1000 lb at midspan
+        // FEM_A = -Pab²/L² = -1000 * 5 * 25 / 100 = -1250 ft-lb
+        // FEM_B = +Pa²b/L² = +1000 * 25 * 5 / 100 = +1250 ft-lb
+        let (fem_a, fem_b) = fem_point_load(1000.0, 5.0, 10.0);
+        assert!(
+            approx_eq_tolerance(fem_a, -1250.0, 1.0),
+            "FEM_A = {} (expected -1250)",
+            fem_a
+        );
+        assert!(
+            approx_eq_tolerance(fem_b, 1250.0, 1.0),
+            "FEM_B = {} (expected +1250)",
+            fem_b
+        );
+    }
+
+    // =======================================================================
+    // FIXED-FIXED BEAM TESTS
+    // =======================================================================
+
+    #[test]
+    fn test_fixed_fixed_uniform_end_moments() {
+        // 10 ft beam, 100 plf
+        // M_end = wL²/12 = 100 * 100 / 12 = 833.33 ft-lb
+        let (m_a, m_b) = fixed_fixed_uniform_end_moments(100.0, 10.0);
+        assert!(
+            approx_eq_tolerance(m_a, 833.33, 1.0),
+            "M_A = {} (expected 833.33)",
+            m_a
+        );
+        assert!(
+            approx_eq_tolerance(m_b, 833.33, 1.0),
+            "M_B = {} (expected 833.33)",
+            m_b
+        );
+    }
+
+    #[test]
+    fn test_fixed_fixed_uniform_max_positive_moment() {
+        // 10 ft beam, 100 plf
+        // M_max = wL²/24 = 100 * 100 / 24 = 416.67 ft-lb
+        let m = fixed_fixed_uniform_max_positive_moment(100.0, 10.0);
+        assert!(
+            approx_eq_tolerance(m, 416.67, 1.0),
+            "M_max = {} (expected 416.67)",
+            m
+        );
+    }
+
+    #[test]
+    fn test_fixed_fixed_uniform_moment_at_midspan() {
+        // 10 ft beam, 100 plf
+        // At midspan x=5: M = wL²/24 = 416.67 ft-lb (positive, sagging)
+        let m = fixed_fixed_uniform_moment(100.0, 10.0, 5.0);
+        assert!(
+            approx_eq_tolerance(m, 416.67, 1.0),
+            "M(L/2) = {} (expected 416.67)",
+            m
+        );
+    }
+
+    #[test]
+    fn test_fixed_fixed_uniform_moment_at_support() {
+        // At x=0: M = -wL²/12 (hogging)
+        let m = fixed_fixed_uniform_moment(100.0, 10.0, 0.0);
+        assert!(
+            approx_eq_tolerance(m, -833.33, 1.0),
+            "M(0) = {} (expected -833.33)",
+            m
+        );
+    }
+
+    #[test]
+    fn test_fixed_fixed_uniform_max_deflection() {
+        // 10 ft beam, 100 plf, E = 1.6e6 psi, I = 100 in⁴
+        // δ_max = wL⁴/(384EI)
+        // w = 100 plf = 8.333 lb/in
+        // L = 120 in
+        // δ_max = 8.333 * 120^4 / (384 * 1.6e6 * 100)
+        //       = 8.333 * 207,360,000 / 61,440,000,000 = 0.0281 in
+        let w = 100.0 / 12.0; // Convert plf to lb/in
+        let l = 120.0; // inches
+        let e = 1.6e6;
+        let i = 100.0;
+        let delta = fixed_fixed_uniform_max_deflection(w, l, e, i);
+        assert!(
+            approx_eq_tolerance(delta, 0.0281, 0.001),
+            "δ_max = {} (expected ~0.0281)",
+            delta
+        );
+    }
+
+    #[test]
+    fn test_fixed_fixed_point_end_moments() {
+        // 10 ft beam, 1000 lb at midspan
+        // M_A = M_B = Pab²/L² = Pa²b/L² = 1000 * 5 * 25 / 100 = 1250 ft-lb
+        let (m_a, m_b) = fixed_fixed_point_end_moments(1000.0, 5.0, 10.0);
+        assert!(
+            approx_eq_tolerance(m_a, 1250.0, 1.0),
+            "M_A = {} (expected 1250)",
+            m_a
+        );
+        assert!(
+            approx_eq_tolerance(m_b, 1250.0, 1.0),
+            "M_B = {} (expected 1250)",
+            m_b
+        );
+    }
+
+    // =======================================================================
+    // CANTILEVER BEAM TESTS
+    // =======================================================================
+
+    #[test]
+    fn test_cantilever_uniform_reactions() {
+        // 10 ft cantilever, 100 plf
+        // R = wL = 1000 lb
+        // M = wL²/2 = 5000 ft-lb
+        let (r, m) = cantilever_uniform_reactions(100.0, 10.0);
+        assert!(approx_eq(r, 1000.0), "R = {} (expected 1000)", r);
+        assert!(approx_eq(m, 5000.0), "M = {} (expected 5000)", m);
+    }
+
+    #[test]
+    fn test_cantilever_uniform_moment_at_support() {
+        // At x=0: M = -wL²/2 = -5000 ft-lb (hogging)
+        let m = cantilever_uniform_moment(100.0, 10.0, 0.0);
+        assert!(
+            approx_eq(m, -5000.0),
+            "M(0) = {} (expected -5000)",
+            m
+        );
+    }
+
+    #[test]
+    fn test_cantilever_uniform_moment_at_free_end() {
+        // At x=L: M = 0
+        let m = cantilever_uniform_moment(100.0, 10.0, 10.0);
+        assert!(approx_eq(m, 0.0), "M(L) = {} (expected 0)", m);
+    }
+
+    #[test]
+    fn test_cantilever_uniform_shear() {
+        // At x=0: V = wL = 1000 lb
+        // At x=L: V = 0
+        let v0 = cantilever_uniform_shear(100.0, 10.0, 0.0);
+        let vl = cantilever_uniform_shear(100.0, 10.0, 10.0);
+        assert!(approx_eq(v0, 1000.0), "V(0) = {} (expected 1000)", v0);
+        assert!(approx_eq(vl, 0.0), "V(L) = {} (expected 0)", vl);
+    }
+
+    #[test]
+    fn test_cantilever_point_reactions() {
+        // 8 ft cantilever, 500 lb at tip (a = 8 ft)
+        // R = P = 500 lb
+        // M = Pa = 4000 ft-lb
+        let (r, m) = cantilever_point_reactions(500.0, 8.0);
+        assert!(approx_eq(r, 500.0), "R = {} (expected 500)", r);
+        assert!(approx_eq(m, 4000.0), "M = {} (expected 4000)", m);
+    }
+
+    // =======================================================================
+    // PROPPED CANTILEVER (FIXED-PINNED) TESTS
+    // =======================================================================
+
+    #[test]
+    fn test_fixed_pinned_uniform_reactions() {
+        // 10 ft propped cantilever, 100 plf
+        // R_A = 5wL/8 = 625 lb
+        // R_B = 3wL/8 = 375 lb
+        // M_A = wL²/8 = 1250 ft-lb
+        let (r_a, r_b, m_a) = fixed_pinned_uniform_reactions(100.0, 10.0);
+        assert!(
+            approx_eq(r_a, 625.0),
+            "R_A = {} (expected 625)",
+            r_a
+        );
+        assert!(
+            approx_eq(r_b, 375.0),
+            "R_B = {} (expected 375)",
+            r_b
+        );
+        assert!(
+            approx_eq(m_a, 1250.0),
+            "M_A = {} (expected 1250)",
+            m_a
+        );
+    }
+
+    #[test]
+    fn test_fixed_pinned_uniform_max_moment() {
+        // M_max = 9wL²/128 = 703.125 ft-lb
+        let m = fixed_pinned_uniform_max_positive_moment(100.0, 10.0);
+        assert!(
+            approx_eq_tolerance(m, 703.125, 1.0),
+            "M_max = {} (expected 703.125)",
+            m
+        );
     }
 }

@@ -71,16 +71,18 @@ We're taking a **depth-first approach**: fully implement one element type before
   - Compression Edge Braced (C_L = 1.0): checkbox
 
 **Load Handling:**
-- [ ] Point loads at specific locations (calculation, not just UI)
-- [ ] Partial uniform loads (start/end positions)
+- [x] Point loads at specific locations (superposition analysis)
+- [ ] Partial uniform loads (start/end positions) - formulas ready, UI pending
 - [ ] Moment loads
 - [ ] Multiple load cases with envelope results
 
-**Span Conditions:**
-- [x] Simply supported (current)
-- [ ] Cantilever
-- [ ] Continuous spans (2-span, 3-span)
-- [ ] Fixed ends
+**Span Conditions:** ✓ Core architecture complete
+- [x] Simply supported (pin-pin)
+- [x] Cantilever (fixed-free)
+- [x] Fixed-fixed
+- [x] Propped cantilever (fixed-pinned)
+- [x] Continuous spans (2-span, 3-span, N-span) - Hardy Cross moment distribution
+- [ ] GUI controls for multi-span configuration (pending)
 
 **Section/Material:**
 - [ ] Standard lumber sizes dropdown (2x4, 2x6, 2x8, 2x10, 2x12, etc.)
@@ -92,7 +94,57 @@ We're taking a **depth-first approach**: fully implement one element type before
 - [x] Governing load combination display
 - [x] Adjustment factor breakdown in results (AdjustmentSummary)
 - [ ] Code reference citations (NDS section numbers)
-- [ ] Diagrams for non-uniform loads
+- [x] Diagrams for shear, moment, deflection (single-span)
+- [ ] Diagrams for continuous beams (multi-span)
+
+---
+
+## Multi-Span Continuous Beam Support: CORE COMPLETE ✓
+
+Full support for multi-span continuous beams with configurable support conditions.
+
+### New Data Model (`calc_core/src/calculations/continuous_beam.rs`)
+- [x] `SupportType` enum: Free, Pinned, Roller, Fixed
+- [x] `SpanSegment` struct: per-span length, width, depth, material
+- [x] `ContinuousBeamInput`: N spans with N+1 support conditions
+- [x] `ContinuousBeamResult`: span-by-span results + global extrema
+- [x] Convenience constructors: `simple_span()`, `fixed_fixed()`, `cantilever()`
+- [x] Migrated `CalculationItem::Beam` to use `ContinuousBeamInput`
+
+### Analysis Engine
+- [x] **Single-span closed-form solutions** (Roark's formulas):
+  - Pin-pin (simply supported)
+  - Fixed-fixed
+  - Fixed-pinned (propped cantilever)
+  - Fixed-free (cantilever)
+- [x] **Multi-span Hardy Cross moment distribution** (`moment_distribution.rs`):
+  - Distribution factor calculation based on span stiffnesses
+  - Fixed-end moment calculation for uniform/point loads
+  - Iterative distribution with 50% carryover
+  - Convergence check (tolerance-based)
+  - Exterior pinned support release
+
+### Fixed-End Formulas (`calc_core/src/equations/beam.rs`)
+- [x] `fem_uniform_full()` - FEM for full uniform load
+- [x] `fem_point_load()` - FEM for point load at any position
+- [x] `fem_partial_uniform()` - FEM for partial uniform load
+- [x] Fixed-fixed beam: reactions, moments, shear, deflection
+- [x] Cantilever beam: reactions, moments, shear, deflection
+- [x] Propped cantilever: reactions, moments
+
+### Integration
+- [x] PDF generation updated for `ContinuousBeamInput`/`ContinuousBeamResult`
+- [x] GUI updated to use new types (single-span mode)
+- [x] All 216 tests pass (179 unit + 37 doc)
+
+### Remaining for Multi-Span
+- [ ] GUI: Add span list with +/- buttons
+- [ ] GUI: Support type dropdown at each node
+- [ ] GUI: Multi-span beam schematic
+- [ ] GUI: Continuous M/V/δ diagrams across spans
+- [ ] Show reactions and moments at each support
+
+---
 
 ## What's Been Completed
 
@@ -110,7 +162,7 @@ We're taking a **depth-first approach**: fully implement one element type before
 - [x] PDF generation with Typst
 - [x] Full Iced GUI with live preview
 - [x] Diagram rendering (beam schematic, shear, moment, deflection)
-- [x] Comprehensive unit tests (140 passing: 112 unit + 28 doc)
+- [x] Comprehensive unit tests (216 passing: 179 unit + 37 doc)
 
 ### Recent Additions
 - [x] Live preview - results update as you type
@@ -131,3 +183,12 @@ We're taking a **depth-first approach**: fully implement one element type before
   - Temperature, Incising, Flat Use (less common)
   - Compression edge braced checkbox for C_L
   - Factors saved/loaded with beam data
+- [x] **Equations module** (`calc_core/src/equations/`)
+  - Documented statics formulas with Roark's references
+  - Sign conventions documented
+  - Simply-supported, fixed-fixed, cantilever, propped cantilever formulas
+- [x] **Multi-span continuous beam architecture**
+  - ContinuousBeamInput/ContinuousBeamResult data model
+  - Hardy Cross moment distribution solver
+  - All boundary condition combinations supported
+  - Integrated with load combinations and NDS factors

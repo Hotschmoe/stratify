@@ -31,6 +31,7 @@ pub mod section;
 
 // Re-export commonly used items
 pub use beam::{
+    // Simply-supported formulas
     point_load_moment,
     point_load_shear,
     point_load_deflection,
@@ -42,6 +43,33 @@ pub use beam::{
     partial_uniform_reactions,
     partial_uniform_moment,
     partial_uniform_shear,
+    // Fixed-end moments (for moment distribution)
+    fem_uniform_full,
+    fem_point_load,
+    fem_partial_uniform,
+    // Fixed-fixed beam formulas
+    fixed_fixed_uniform_reactions,
+    fixed_fixed_uniform_end_moments,
+    fixed_fixed_uniform_max_positive_moment,
+    fixed_fixed_uniform_moment,
+    fixed_fixed_uniform_shear,
+    fixed_fixed_uniform_deflection,
+    fixed_fixed_uniform_max_deflection,
+    fixed_fixed_point_reactions,
+    fixed_fixed_point_end_moments,
+    // Cantilever formulas
+    cantilever_uniform_reactions,
+    cantilever_uniform_shear,
+    cantilever_uniform_moment,
+    cantilever_uniform_deflection,
+    cantilever_uniform_max_deflection,
+    cantilever_point_reactions,
+    cantilever_point_moment,
+    cantilever_point_deflection,
+    // Propped cantilever (fixed-pinned)
+    fixed_pinned_uniform_reactions,
+    fixed_pinned_uniform_moment,
+    fixed_pinned_uniform_max_positive_moment,
 };
 
 pub use section::{

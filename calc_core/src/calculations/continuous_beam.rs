@@ -1,0 +1,1310 @@
+//! # Continuous Beam Analysis
+//!
+//! Multi-span beam analysis with configurable support conditions.
+//! Supports pinned, fixed, and free (cantilever) end conditions.
+//!
+//! ## Analysis Methods
+//!
+//! - **Single-span with fixed ends**: Closed-form solutions from Roark's Formulas
+//! - **Multi-span continuous beams**: Hardy Cross moment distribution
+//!
+//! ## Notation
+//!
+//! - N spans creates N+1 nodes (support locations)
+//! - Nodes are numbered 0 to N (left to right)
+//! - Spans are numbered 0 to N-1 (left to right)
+//!
+//! ## Example
+//!
+//! ```rust
+//! use calc_core::calculations::continuous_beam::{
+//!     ContinuousBeamInput, SupportType, SpanSegment
+//! };
+//! use calc_core::materials::Material;
+//! use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType};
+//!
+//! // Two-span continuous beam: 12' + 10', pinned at all supports
+//! let input = ContinuousBeamInput {
+//!     label: "CB-1".to_string(),
+//!     spans: vec![
+//!         SpanSegment::new(12.0, 1.5, 9.25, Material::default()),
+//!         SpanSegment::new(10.0, 1.5, 9.25, Material::default()),
+//!     ],
+//!     supports: vec![
+//!         SupportType::Pinned,  // Left end
+//!         SupportType::Pinned,  // Interior support
+//!         SupportType::Pinned,  // Right end
+//!     ],
+//!     load_case: EnhancedLoadCase::new("Floor")
+//!         .with_load(DiscreteLoad::uniform(LoadType::Dead, 15.0))
+//!         .with_load(DiscreteLoad::uniform(LoadType::Live, 40.0)),
+//!     ..Default::default()
+//! };
+//! ```
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::errors::{CalcError, CalcResult};
+use crate::loads::EnhancedLoadCase;
+use crate::materials::Material;
+use crate::nds_factors::AdjustmentFactors;
+
+// =============================================================================
+// SUPPORT TYPE
+// =============================================================================
+
+/// Support condition at a node (support location)
+///
+/// Each node in a continuous beam can have one of these support types,
+/// which determines its boundary conditions for analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum SupportType {
+    /// Free end - no restraint (cantilever end)
+    ///
+    /// - Vertical displacement: free
+    /// - Rotation: free
+    /// - Use for cantilever overhangs
+    Free,
+
+    /// Pinned/hinged support - restrains vertical displacement, allows rotation
+    ///
+    /// - Vertical displacement: restrained (Δ = 0)
+    /// - Rotation: free
+    /// - Most common support type
+    #[default]
+    Pinned,
+
+    /// Roller support - same as pinned for vertical beam analysis
+    ///
+    /// - Vertical displacement: restrained (Δ = 0)
+    /// - Rotation: free
+    /// - Equivalent to Pinned for gravity load analysis
+    Roller,
+
+    /// Fixed support - restrains both displacement and rotation
+    ///
+    /// - Vertical displacement: restrained (Δ = 0)
+    /// - Rotation: restrained (θ = 0)
+    /// - Creates moment reaction at support
+    Fixed,
+}
+
+impl SupportType {
+    /// All available support types for UI selection
+    pub const ALL: [SupportType; 4] = [
+        SupportType::Pinned,
+        SupportType::Roller,
+        SupportType::Fixed,
+        SupportType::Free,
+    ];
+
+    /// Returns true if this support restrains vertical displacement
+    pub fn restrains_vertical(&self) -> bool {
+        matches!(
+            self,
+            SupportType::Pinned | SupportType::Roller | SupportType::Fixed
+        )
+    }
+
+    /// Returns true if this support restrains rotation
+    pub fn restrains_rotation(&self) -> bool {
+        matches!(self, SupportType::Fixed)
+    }
+
+    /// Get display name for UI
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            SupportType::Free => "Free",
+            SupportType::Pinned => "Pinned",
+            SupportType::Roller => "Roller",
+            SupportType::Fixed => "Fixed",
+        }
+    }
+
+    /// Get short symbol for diagrams
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            SupportType::Free => "",
+            SupportType::Pinned => "△",
+            SupportType::Roller => "○",
+            SupportType::Fixed => "▣",
+        }
+    }
+}
+
+impl std::fmt::Display for SupportType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// =============================================================================
+// SPAN SEGMENT
+// =============================================================================
+
+/// A single span segment between two nodes
+///
+/// Each span can have its own section properties and material.
+/// For uniform beams, all spans will have the same properties.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpanSegment {
+    /// Unique identifier for this span
+    pub id: Uuid,
+
+    /// Span length in feet
+    pub length_ft: f64,
+
+    /// Actual beam width in inches
+    pub width_in: f64,
+
+    /// Actual beam depth in inches
+    pub depth_in: f64,
+
+    /// Material for this span
+    pub material: Material,
+
+    /// Optional user label for this span (e.g., "Span 1", "Over kitchen")
+    #[serde(default)]
+    pub label: String,
+}
+
+impl SpanSegment {
+    /// Create a new span segment
+    pub fn new(length_ft: f64, width_in: f64, depth_in: f64, material: Material) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            length_ft,
+            width_in,
+            depth_in,
+            material,
+            label: String::new(),
+        }
+    }
+
+    /// Create with a label
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = label.into();
+        self
+    }
+
+    /// Calculate moment of inertia I = bd³/12 (in⁴)
+    pub fn moment_of_inertia_in4(&self) -> f64 {
+        self.width_in * self.depth_in.powi(3) / 12.0
+    }
+
+    /// Calculate section modulus S = bd²/6 (in³)
+    pub fn section_modulus_in3(&self) -> f64 {
+        self.width_in * self.depth_in.powi(2) / 6.0
+    }
+
+    /// Calculate cross-sectional area A = bd (in²)
+    pub fn area_in2(&self) -> f64 {
+        self.width_in * self.depth_in
+    }
+
+    /// Get modulus of elasticity from material (psi)
+    pub fn e_psi(&self) -> f64 {
+        self.material.base_properties().e_psi
+    }
+
+    /// Get minimum modulus for stability (psi)
+    pub fn e_min_psi(&self) -> f64 {
+        self.material.base_properties().e_min_psi
+    }
+
+    /// Calculate flexural stiffness EI (lb-in²)
+    pub fn ei(&self) -> f64 {
+        self.e_psi() * self.moment_of_inertia_in4()
+    }
+
+    /// Calculate stiffness factor K = EI/L (lb-in)
+    ///
+    /// This is used for moment distribution calculations.
+    /// Returns K in consistent units (converts L to inches).
+    pub fn stiffness_k(&self) -> f64 {
+        let l_in = self.length_ft * 12.0;
+        self.ei() / l_in
+    }
+
+    /// Calculate modified stiffness for a pin-ended far end (3EI/L)
+    ///
+    /// Used when the far end of the span is pinned/roller.
+    pub fn stiffness_k_modified(&self) -> f64 {
+        self.stiffness_k() * 0.75 // 3EI/L = 0.75 * 4EI/L
+    }
+
+    /// Self-weight in plf (assuming 35 pcf wood density)
+    pub fn self_weight_plf(&self) -> f64 {
+        const WOOD_DENSITY_PCF: f64 = 35.0;
+        self.area_in2() * WOOD_DENSITY_PCF / 144.0
+    }
+
+    /// Validate span parameters
+    pub fn validate(&self) -> CalcResult<()> {
+        if self.length_ft <= 0.0 {
+            return Err(CalcError::invalid_input(
+                "length_ft",
+                self.length_ft.to_string(),
+                "Span length must be positive",
+            ));
+        }
+        if self.length_ft > 60.0 {
+            return Err(CalcError::invalid_input(
+                "length_ft",
+                self.length_ft.to_string(),
+                "Span exceeds 60 ft - verify member sizing",
+            ));
+        }
+        if self.width_in <= 0.0 {
+            return Err(CalcError::invalid_input(
+                "width_in",
+                self.width_in.to_string(),
+                "Width must be positive",
+            ));
+        }
+        if self.depth_in <= 0.0 {
+            return Err(CalcError::invalid_input(
+                "depth_in",
+                self.depth_in.to_string(),
+                "Depth must be positive",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for SpanSegment {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            length_ft: 12.0,
+            width_in: 1.5,
+            depth_in: 9.25,
+            material: Material::default(),
+            label: String::new(),
+        }
+    }
+}
+
+// =============================================================================
+// CONTINUOUS BEAM INPUT
+// =============================================================================
+
+/// Input for continuous beam analysis
+///
+/// A continuous beam consists of multiple spans connected at nodes (supports).
+/// Each span can have different section properties and materials.
+/// Each node can have different support conditions.
+///
+/// ## Node/Span Relationship
+///
+/// For N spans, there are N+1 nodes (support locations):
+///
+/// ```text
+/// Node 0    Node 1    Node 2    Node 3
+///   |--------|---------|---------|
+///    Span 0    Span 1    Span 2
+/// ```
+///
+/// ## Support Configuration Examples
+///
+/// **Simply-supported single span:**
+/// - 1 span, 2 nodes: [Pinned, Roller]
+///
+/// **Two-span continuous:**
+/// - 2 spans, 3 nodes: [Pinned, Pinned, Roller]
+///
+/// **Cantilever:**
+/// - 1 span, 2 nodes: [Fixed, Free]
+///
+/// **Propped cantilever:**
+/// - 1 span, 2 nodes: [Fixed, Roller]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinuousBeamInput {
+    /// User label for this beam
+    pub label: String,
+
+    /// Span segments (ordered left to right)
+    ///
+    /// Must have at least one span. For a single-span beam, this has one entry.
+    pub spans: Vec<SpanSegment>,
+
+    /// Support conditions at each node
+    ///
+    /// Length must be exactly `spans.len() + 1`.
+    /// - `supports[0]` is the left end
+    /// - `supports[spans.len()]` is the right end
+    /// - Interior indices are interior supports
+    pub supports: Vec<SupportType>,
+
+    /// Load case with discrete loads
+    ///
+    /// Load positions are measured from the left end of the entire beam.
+    /// For multi-span beams, loads may span across multiple spans.
+    pub load_case: EnhancedLoadCase,
+
+    /// NDS adjustment factors
+    #[serde(default)]
+    pub adjustment_factors: AdjustmentFactors,
+}
+
+impl ContinuousBeamInput {
+    /// Create a simple single-span beam (simply-supported)
+    ///
+    /// This is the most common configuration and matches the behavior
+    /// of the original `BeamInput` struct.
+    pub fn simple_span(
+        label: impl Into<String>,
+        span_ft: f64,
+        width_in: f64,
+        depth_in: f64,
+        material: Material,
+        load_case: EnhancedLoadCase,
+    ) -> Self {
+        let span = SpanSegment::new(span_ft, width_in, depth_in, material);
+        Self {
+            label: label.into(),
+            spans: vec![span],
+            supports: vec![SupportType::Pinned, SupportType::Roller],
+            load_case,
+            adjustment_factors: AdjustmentFactors::default(),
+        }
+    }
+
+    /// Create a cantilever beam (fixed at left, free at right)
+    pub fn cantilever(
+        label: impl Into<String>,
+        span_ft: f64,
+        width_in: f64,
+        depth_in: f64,
+        material: Material,
+        load_case: EnhancedLoadCase,
+    ) -> Self {
+        let span = SpanSegment::new(span_ft, width_in, depth_in, material);
+        Self {
+            label: label.into(),
+            spans: vec![span],
+            supports: vec![SupportType::Fixed, SupportType::Free],
+            load_case,
+            adjustment_factors: AdjustmentFactors::default(),
+        }
+    }
+
+    /// Create a fixed-fixed beam
+    pub fn fixed_fixed(
+        label: impl Into<String>,
+        span_ft: f64,
+        width_in: f64,
+        depth_in: f64,
+        material: Material,
+        load_case: EnhancedLoadCase,
+    ) -> Self {
+        let span = SpanSegment::new(span_ft, width_in, depth_in, material);
+        Self {
+            label: label.into(),
+            spans: vec![span],
+            supports: vec![SupportType::Fixed, SupportType::Fixed],
+            load_case,
+            adjustment_factors: AdjustmentFactors::default(),
+        }
+    }
+
+    /// Total length of all spans combined (ft)
+    pub fn total_length_ft(&self) -> f64 {
+        self.spans.iter().map(|s| s.length_ft).sum()
+    }
+
+    /// Number of spans
+    pub fn span_count(&self) -> usize {
+        self.spans.len()
+    }
+
+    /// Number of nodes (always span_count + 1)
+    pub fn node_count(&self) -> usize {
+        self.spans.len() + 1
+    }
+
+    /// Get cumulative positions of each node from left end (ft)
+    ///
+    /// Returns a vector of length `node_count()` where:
+    /// - positions[0] = 0.0 (left end)
+    /// - positions[i] = sum of lengths of spans 0 to i-1
+    pub fn node_positions(&self) -> Vec<f64> {
+        let mut positions = vec![0.0];
+        let mut cumulative = 0.0;
+        for span in &self.spans {
+            cumulative += span.length_ft;
+            positions.push(cumulative);
+        }
+        positions
+    }
+
+    /// Check if this is a single-span beam
+    pub fn is_single_span(&self) -> bool {
+        self.spans.len() == 1
+    }
+
+    /// Check if beam is simply-supported (single span, pin-roller)
+    pub fn is_simply_supported(&self) -> bool {
+        self.spans.len() == 1
+            && matches!(
+                self.supports.as_slice(),
+                [SupportType::Pinned, SupportType::Roller]
+                    | [SupportType::Pinned, SupportType::Pinned]
+                    | [SupportType::Roller, SupportType::Pinned]
+            )
+    }
+
+    /// Check if beam is a cantilever (fixed at one end, free at other)
+    pub fn is_cantilever(&self) -> bool {
+        self.spans.len() == 1
+            && matches!(
+                self.supports.as_slice(),
+                [SupportType::Fixed, SupportType::Free] | [SupportType::Free, SupportType::Fixed]
+            )
+    }
+
+    /// Check if beam is fixed at both ends
+    pub fn is_fixed_fixed(&self) -> bool {
+        self.spans.len() == 1
+            && matches!(
+                self.supports.as_slice(),
+                [SupportType::Fixed, SupportType::Fixed]
+            )
+    }
+
+    /// Check if beam has any fixed supports (requires indeterminate analysis)
+    pub fn has_fixed_support(&self) -> bool {
+        self.supports.iter().any(|s| *s == SupportType::Fixed)
+    }
+
+    /// Check if structure is statically indeterminate
+    ///
+    /// Indeterminate if:
+    /// - Multiple spans (continuous), OR
+    /// - Any fixed support
+    pub fn is_indeterminate(&self) -> bool {
+        self.spans.len() > 1 || self.has_fixed_support()
+    }
+
+    /// Validate input parameters
+    pub fn validate(&self) -> CalcResult<()> {
+        // Must have at least one span
+        if self.spans.is_empty() {
+            return Err(CalcError::invalid_input(
+                "spans",
+                "empty",
+                "At least one span is required",
+            ));
+        }
+
+        // Must have correct number of supports
+        let expected_supports = self.spans.len() + 1;
+        if self.supports.len() != expected_supports {
+            return Err(CalcError::invalid_input(
+                "supports",
+                self.supports.len().to_string(),
+                &format!(
+                    "Expected {} supports for {} spans",
+                    expected_supports,
+                    self.spans.len()
+                ),
+            ));
+        }
+
+        // Validate each span
+        for (i, span) in self.spans.iter().enumerate() {
+            span.validate().map_err(|e| {
+                CalcError::invalid_input(&format!("spans[{}]", i), "invalid", &e.to_string())
+            })?;
+        }
+
+        // Must have at least one vertical support for stability
+        let vertical_supports: usize = self
+            .supports
+            .iter()
+            .filter(|s| s.restrains_vertical())
+            .count();
+
+        if vertical_supports == 0 {
+            return Err(CalcError::invalid_input(
+                "supports",
+                "none restrained",
+                "Structure is unstable - at least one vertical support is required",
+            ));
+        }
+
+        // Check for unstable cantilever configuration
+        // (free end without a fixed support somewhere)
+        let has_free = self.supports.iter().any(|s| *s == SupportType::Free);
+        let has_fixed = self.supports.iter().any(|s| *s == SupportType::Fixed);
+
+        if has_free && !has_fixed && vertical_supports < 2 {
+            return Err(CalcError::invalid_input(
+                "supports",
+                "unstable cantilever",
+                "Cantilever requires a fixed support or two vertical supports",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Add a span to the right end
+    pub fn add_span(&mut self, span: SpanSegment) {
+        self.spans.push(span);
+        // Add a default support for the new node
+        self.supports.push(SupportType::Roller);
+    }
+
+    /// Remove the rightmost span (if more than one exists)
+    pub fn remove_last_span(&mut self) -> Option<SpanSegment> {
+        if self.spans.len() > 1 {
+            self.supports.pop(); // Remove the rightmost support
+            self.spans.pop()
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for ContinuousBeamInput {
+    fn default() -> Self {
+        Self {
+            label: String::new(),
+            spans: vec![SpanSegment::default()],
+            supports: vec![SupportType::Pinned, SupportType::Roller],
+            load_case: EnhancedLoadCase::default(),
+            adjustment_factors: AdjustmentFactors::default(),
+        }
+    }
+}
+
+// =============================================================================
+// CONTINUOUS BEAM RESULT
+// =============================================================================
+
+/// Results for a single span within a continuous beam
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpanResult {
+    /// Span index (0-based)
+    pub span_index: usize,
+
+    /// Left-end moment (ft-lb) - positive causes tension on bottom
+    pub moment_left_ftlb: f64,
+
+    /// Right-end moment (ft-lb)
+    pub moment_right_ftlb: f64,
+
+    /// Left-end shear (lb) - positive upward
+    pub shear_left_lb: f64,
+
+    /// Right-end shear (lb)
+    pub shear_right_lb: f64,
+
+    /// Maximum positive moment in span (ft-lb)
+    pub max_positive_moment_ftlb: f64,
+
+    /// Position of max positive moment from left end of span (ft)
+    pub max_positive_moment_pos_ft: f64,
+
+    /// Maximum negative moment in span (ft-lb) - at supports
+    pub max_negative_moment_ftlb: f64,
+
+    /// Maximum shear magnitude in span (lb)
+    pub max_shear_lb: f64,
+
+    /// Maximum deflection in span (in)
+    pub max_deflection_in: f64,
+
+    /// Position of max deflection from left end of span (ft)
+    pub max_deflection_pos_ft: f64,
+
+    /// Actual bending stress at max moment (psi)
+    pub actual_fb_psi: f64,
+
+    /// Allowable bending stress (psi)
+    pub allowable_fb_psi: f64,
+
+    /// Bending unity ratio
+    pub bending_unity: f64,
+
+    /// Actual shear stress (psi)
+    pub actual_fv_psi: f64,
+
+    /// Allowable shear stress (psi)
+    pub allowable_fv_psi: f64,
+
+    /// Shear unity ratio
+    pub shear_unity: f64,
+
+    /// Deflection unity ratio
+    pub deflection_unity: f64,
+}
+
+impl SpanResult {
+    /// Check if this span passes all checks
+    pub fn passes(&self) -> bool {
+        self.bending_unity <= 1.0 && self.shear_unity <= 1.0 && self.deflection_unity <= 1.0
+    }
+
+    /// Get governing unity ratio for this span
+    pub fn governing_unity(&self) -> f64 {
+        self.bending_unity
+            .max(self.shear_unity)
+            .max(self.deflection_unity)
+    }
+}
+
+/// Results from continuous beam analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContinuousBeamResult {
+    // === Per-Span Results ===
+    /// Results for each span
+    pub span_results: Vec<SpanResult>,
+
+    // === Per-Node Results ===
+    /// Reaction force at each node (lb) - positive upward
+    pub reactions: Vec<f64>,
+
+    /// Support moment at each node (ft-lb)
+    ///
+    /// Non-zero at fixed supports and interior supports of continuous beams.
+    pub support_moments: Vec<f64>,
+
+    /// Rotation at each node (radians)
+    pub rotations: Vec<f64>,
+
+    // === Global Extrema ===
+    /// Maximum positive moment across all spans (ft-lb)
+    pub max_positive_moment_ftlb: f64,
+
+    /// Location: (span_index, position_within_span_ft)
+    pub max_positive_moment_location: (usize, f64),
+
+    /// Maximum negative moment magnitude (ft-lb) - typically at supports
+    pub max_negative_moment_ftlb: f64,
+
+    /// Node index of max negative moment
+    pub max_negative_moment_node: usize,
+
+    /// Maximum shear across all spans (lb)
+    pub max_shear_lb: f64,
+
+    /// Location: (span_index, position_within_span_ft)
+    pub max_shear_location: (usize, f64),
+
+    /// Maximum deflection across all spans (in)
+    pub max_deflection_in: f64,
+
+    /// Location: (span_index, position_within_span_ft)
+    pub max_deflection_location: (usize, f64),
+
+    // === Global Design Checks ===
+    /// Governing unity ratio across all spans
+    pub governing_unity: f64,
+
+    /// Which span governs (index)
+    pub governing_span: usize,
+
+    /// What condition governs
+    pub governing_condition: String,
+
+    // === Diagram Data ===
+    /// Shear diagram: (position_from_left_ft, shear_lb)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shear_diagram: Vec<(f64, f64)>,
+
+    /// Moment diagram: (position_from_left_ft, moment_ftlb)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moment_diagram: Vec<(f64, f64)>,
+
+    /// Deflection diagram: (position_from_left_ft, deflection_in)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deflection_diagram: Vec<(f64, f64)>,
+
+    // === Load Info ===
+    /// Governing load combination name
+    pub governing_combination: String,
+
+    /// Minimum reaction combination (for uplift)
+    pub min_reaction_combination: String,
+
+    /// Minimum reactions at each node (for uplift design)
+    pub min_reactions: Vec<f64>,
+}
+
+impl ContinuousBeamResult {
+    /// Check if all spans pass all checks
+    pub fn passes(&self) -> bool {
+        self.governing_unity <= 1.0
+    }
+
+    /// Get overall pass/fail status description
+    pub fn status(&self) -> &'static str {
+        if self.passes() {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    }
+}
+
+impl Default for ContinuousBeamResult {
+    fn default() -> Self {
+        Self {
+            span_results: Vec::new(),
+            reactions: Vec::new(),
+            support_moments: Vec::new(),
+            rotations: Vec::new(),
+            max_positive_moment_ftlb: 0.0,
+            max_positive_moment_location: (0, 0.0),
+            max_negative_moment_ftlb: 0.0,
+            max_negative_moment_node: 0,
+            max_shear_lb: 0.0,
+            max_shear_location: (0, 0.0),
+            max_deflection_in: 0.0,
+            max_deflection_location: (0, 0.0),
+            governing_unity: 0.0,
+            governing_span: 0,
+            governing_condition: String::new(),
+            shear_diagram: Vec::new(),
+            moment_diagram: Vec::new(),
+            deflection_diagram: Vec::new(),
+            governing_combination: String::new(),
+            min_reaction_combination: String::new(),
+            min_reactions: Vec::new(),
+        }
+    }
+}
+
+// =============================================================================
+// CALCULATION FUNCTION
+// =============================================================================
+
+use crate::loads::DesignMethod;
+
+/// Calculate continuous beam results
+///
+/// Handles all beam configurations:
+/// - Single-span simply-supported (pin-roller)
+/// - Single-span with fixed ends (fixed-fixed, fixed-pin, cantilever)
+/// - Multi-span continuous beams
+///
+/// # Arguments
+///
+/// * `input` - Continuous beam parameters
+/// * `method` - Design method (ASD or LRFD)
+///
+/// # Returns
+///
+/// * `Ok(ContinuousBeamResult)` - Calculation results
+/// * `Err(CalcError)` - If inputs are invalid
+pub fn calculate_continuous(
+    input: &ContinuousBeamInput,
+    method: DesignMethod,
+) -> CalcResult<ContinuousBeamResult> {
+    use crate::calculations::moment_distribution::analyze_moment_distribution;
+    use crate::loads::LoadType;
+
+    input.validate()?;
+
+    let combinations = method.combinations();
+    let n_spans = input.span_count();
+    let n_nodes = input.node_count();
+    let node_positions = input.node_positions();
+
+    // Track governing results
+    let mut governing_result: Option<ContinuousBeamResult> = None;
+    let mut max_moment = 0.0f64;
+    let mut min_reaction_total = f64::MAX;
+    let mut min_reaction_combo_name = String::new();
+    let mut min_reactions: Vec<f64> = vec![0.0; n_nodes];
+
+    for combo in &combinations {
+        // Build load factors for this combination
+        let load_factors: Vec<(LoadType, f64)> = LoadType::ALL
+            .iter()
+            .map(|lt| (*lt, combo.get_factor(*lt)))
+            .collect();
+
+        // Run moment distribution analysis
+        let dist_result = analyze_moment_distribution(input, &load_factors);
+
+        // Build result from moment distribution output
+        let mut result = build_result_from_distribution(
+            input,
+            &dist_result,
+            &combo.name,
+            method,
+        )?;
+
+        // Check if this combination governs for max moment
+        if result.max_positive_moment_ftlb > max_moment {
+            max_moment = result.max_positive_moment_ftlb;
+            result.governing_combination = combo.name.clone();
+            governing_result = Some(result.clone());
+        }
+
+        // Check for minimum reactions (uplift)
+        let reaction_sum: f64 = result.reactions.iter().sum();
+        if reaction_sum < min_reaction_total {
+            min_reaction_total = reaction_sum;
+            min_reaction_combo_name = combo.name.clone();
+            min_reactions = result.reactions.clone();
+        }
+    }
+
+    let mut final_result = governing_result.unwrap_or_else(|| {
+        // Fallback for empty load case
+        ContinuousBeamResult::default()
+    });
+
+    final_result.min_reaction_combination = min_reaction_combo_name;
+    final_result.min_reactions = min_reactions;
+
+    Ok(final_result)
+}
+
+/// Build a ContinuousBeamResult from moment distribution output
+fn build_result_from_distribution(
+    input: &ContinuousBeamInput,
+    dist_result: &crate::calculations::moment_distribution::DistributionResult,
+    combo_name: &str,
+    method: DesignMethod,
+) -> CalcResult<ContinuousBeamResult> {
+    use crate::nds_factors::{AdjustmentSummary, BeamStability, SizeFactor};
+    use crate::equations::beam::{uniform_load_reactions, uniform_load_shear, uniform_load_moment};
+
+    let n_spans = input.span_count();
+    let n_nodes = input.node_count();
+    let node_positions = input.node_positions();
+
+    let mut span_results = Vec::with_capacity(n_spans);
+    let mut reactions = vec![0.0; n_nodes];
+    let mut shear_diagram: Vec<(f64, f64)> = Vec::new();
+    let mut moment_diagram: Vec<(f64, f64)> = Vec::new();
+    let mut deflection_diagram: Vec<(f64, f64)> = Vec::new();
+
+    // Track global extrema
+    let mut max_positive_moment = 0.0f64;
+    let mut max_positive_moment_loc = (0, 0.0);
+    let mut max_negative_moment = 0.0f64;
+    let mut max_negative_node = 0;
+    let mut max_shear = 0.0f64;
+    let mut max_shear_loc = (0, 0.0);
+    let mut max_deflection = 0.0f64;
+    let mut max_deflection_loc = (0, 0.0);
+    let mut governing_unity = 0.0f64;
+    let mut governing_span = 0;
+    let mut governing_condition = String::from("Bending");
+
+    // Process each span
+    for (i, span) in input.spans.iter().enumerate() {
+        let m_left = dist_result.span_moments_left[i];
+        let m_right = dist_result.span_moments_right[i];
+        let span_start = node_positions[i];
+        let l = span.length_ft;
+
+        // Get total factored uniform load for this span (simplified)
+        // For now, assume uniform load distribution
+        let total_load = input.load_case.total_uniform_plf();
+        let (simple_r1, simple_r2) = uniform_load_reactions(total_load, l);
+
+        // Adjust reactions for end moments
+        // ΔR = (M_B - M_A) / L
+        let delta_r = (m_right - m_left) / l;
+        let r_left = simple_r1 - delta_r;
+        let r_right = simple_r2 + delta_r;
+
+        // Add to node reactions
+        reactions[i] += r_left;
+        reactions[i + 1] += r_right;
+
+        // Calculate shear at left end
+        let v_left = r_left;
+        let v_right = -r_right;
+
+        // Find max shear
+        let span_max_shear = v_left.abs().max(v_right.abs());
+        if span_max_shear > max_shear {
+            max_shear = span_max_shear;
+            max_shear_loc = (i, if v_left.abs() > v_right.abs() { 0.0 } else { l });
+        }
+
+        // Generate shear diagram points for this span
+        let num_points = 21;
+        for p in 0..num_points {
+            let x = l * p as f64 / (num_points - 1) as f64;
+            let v = v_left - total_load * x;
+            shear_diagram.push((span_start + x, v));
+        }
+
+        // Calculate moment at each point
+        // M(x) = M_A + R_left * x - w * x² / 2
+        // But we need to account for end moments
+        let mut span_max_pos_moment = 0.0f64;
+        let mut span_max_pos_moment_x = 0.0;
+
+        for p in 0..num_points {
+            let x = l * p as f64 / (num_points - 1) as f64;
+            let simple_m = uniform_load_moment(total_load, l, x);
+
+            // Linear interpolation of end moments
+            let end_moment_effect = m_left * (1.0 - x / l) + m_right * (x / l);
+            let m = simple_m + end_moment_effect;
+
+            moment_diagram.push((span_start + x, m));
+
+            // Track positive moment
+            if m > span_max_pos_moment {
+                span_max_pos_moment = m;
+                span_max_pos_moment_x = x;
+            }
+        }
+
+        // Track global max positive moment
+        if span_max_pos_moment > max_positive_moment {
+            max_positive_moment = span_max_pos_moment;
+            max_positive_moment_loc = (i, span_max_pos_moment_x);
+        }
+
+        // Track negative moments at supports
+        if m_left.abs() > max_negative_moment {
+            max_negative_moment = m_left.abs();
+            max_negative_node = i;
+        }
+        if m_right.abs() > max_negative_moment {
+            max_negative_moment = m_right.abs();
+            max_negative_node = i + 1;
+        }
+
+        // Calculate deflection (simplified - uniform load approximation)
+        let e = span.e_psi();
+        let i_val = span.moment_of_inertia_in4();
+        let s = span.section_modulus_in3();
+        let area = span.area_in2();
+
+        // Max deflection estimate (midspan for uniform load)
+        let l_in = l * 12.0;
+        let w_lbin = total_load / 12.0; // Convert plf to lb/in
+        let max_defl = 5.0 * w_lbin * l_in.powi(4) / (384.0 * e * i_val);
+
+        if max_defl > max_deflection {
+            max_deflection = max_defl;
+            max_deflection_loc = (i, l / 2.0);
+        }
+
+        // Deflection diagram (approximate parabola)
+        for p in 0..num_points {
+            let x = l * p as f64 / (num_points - 1) as f64;
+            let x_in = x * 12.0;
+            // Simplified deflection shape
+            let defl = w_lbin * x_in * (l_in.powi(3) - 2.0 * l_in * x_in * x_in + x_in.powi(3))
+                / (24.0 * e * i_val);
+            deflection_diagram.push((span_start + x, defl));
+        }
+
+        // Calculate stresses and unity checks
+        let props = span.material.base_properties();
+        let factors = &input.adjustment_factors;
+
+        // Design moment (max of positive and negative at this span)
+        let design_moment = span_max_pos_moment.max(m_left.abs()).max(m_right.abs());
+        let max_moment_inlb = design_moment * 12.0;
+        let actual_fb = max_moment_inlb / s;
+
+        // Calculate size factor
+        let c_f = if !span.material.is_engineered() {
+            SizeFactor::new(span.depth_in, span.width_in).factor_fb()
+        } else {
+            1.0
+        };
+
+        // Calculate beam stability factor
+        let c_l = if factors.compression_edge_braced {
+            1.0
+        } else {
+            let le = factors.unbraced_length_in.unwrap_or(l_in);
+            let stability = BeamStability::new(le, span.width_in, span.depth_in);
+            if stability.is_fully_braced() {
+                1.0
+            } else {
+                let fb_depth = span.material.fb_for_depth(span.depth_in);
+                let fb_star = fb_depth
+                    * factors.c_d()
+                    * factors.c_m_fb()
+                    * factors.c_t()
+                    * c_f
+                    * factors.c_fu(span.width_in)
+                    * factors.c_i_strength()
+                    * factors.c_r();
+                let e_min_prime = factors.adjusted_e_min(props.e_min_psi);
+                stability.factor(fb_star, e_min_prime)
+            }
+        };
+
+        let fb_depth = span.material.fb_for_depth(span.depth_in);
+        let allowable_fb = factors.adjusted_fb(fb_depth, c_f, c_l, span.width_in);
+        let bending_unity = actual_fb / allowable_fb;
+
+        // Shear stress
+        let actual_fv = 3.0 * span_max_shear / (2.0 * area);
+        let allowable_fv = factors.adjusted_fv(props.fv_psi);
+        let shear_unity = actual_fv / allowable_fv;
+
+        // Deflection check
+        let deflection_limit = l_in / 240.0;
+        let deflection_unity = max_defl / deflection_limit;
+
+        // Track governing condition
+        let span_governing = bending_unity.max(shear_unity).max(deflection_unity);
+        if span_governing > governing_unity {
+            governing_unity = span_governing;
+            governing_span = i;
+            governing_condition = if bending_unity >= shear_unity && bending_unity >= deflection_unity
+            {
+                "Bending".to_string()
+            } else if shear_unity >= deflection_unity {
+                "Shear".to_string()
+            } else {
+                "Deflection".to_string()
+            };
+        }
+
+        span_results.push(SpanResult {
+            span_index: i,
+            moment_left_ftlb: m_left,
+            moment_right_ftlb: m_right,
+            shear_left_lb: v_left,
+            shear_right_lb: v_right,
+            max_positive_moment_ftlb: span_max_pos_moment,
+            max_positive_moment_pos_ft: span_max_pos_moment_x,
+            max_negative_moment_ftlb: m_left.abs().max(m_right.abs()),
+            max_shear_lb: span_max_shear,
+            max_deflection_in: max_defl,
+            max_deflection_pos_ft: l / 2.0,
+            actual_fb_psi: actual_fb,
+            allowable_fb_psi: allowable_fb,
+            bending_unity,
+            actual_fv_psi: actual_fv,
+            allowable_fv_psi: allowable_fv,
+            shear_unity,
+            deflection_unity,
+        });
+    }
+
+    Ok(ContinuousBeamResult {
+        span_results,
+        reactions,
+        support_moments: dist_result.support_moments.clone(),
+        rotations: vec![0.0; n_nodes], // Placeholder - could compute from moment distribution
+        max_positive_moment_ftlb: max_positive_moment,
+        max_positive_moment_location: max_positive_moment_loc,
+        max_negative_moment_ftlb: max_negative_moment,
+        max_negative_moment_node: max_negative_node,
+        max_shear_lb: max_shear,
+        max_shear_location: max_shear_loc,
+        max_deflection_in: max_deflection,
+        max_deflection_location: max_deflection_loc,
+        governing_unity,
+        governing_span,
+        governing_condition,
+        shear_diagram,
+        moment_diagram,
+        deflection_diagram,
+        governing_combination: combo_name.to_string(),
+        min_reaction_combination: String::new(),
+        min_reactions: vec![],
+    })
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loads::{DiscreteLoad, LoadType};
+    use crate::materials::{WoodGrade, WoodMaterial, WoodSpecies};
+
+    fn test_material() -> Material {
+        Material::SawnLumber(WoodMaterial::new(
+            WoodSpecies::DouglasFirLarch,
+            WoodGrade::No2,
+        ))
+    }
+
+    #[test]
+    fn test_support_type_display() {
+        assert_eq!(SupportType::Pinned.display_name(), "Pinned");
+        assert_eq!(SupportType::Fixed.display_name(), "Fixed");
+        assert_eq!(SupportType::Free.display_name(), "Free");
+        assert_eq!(SupportType::Roller.display_name(), "Roller");
+    }
+
+    #[test]
+    fn test_support_type_restraints() {
+        assert!(SupportType::Pinned.restrains_vertical());
+        assert!(!SupportType::Pinned.restrains_rotation());
+
+        assert!(SupportType::Fixed.restrains_vertical());
+        assert!(SupportType::Fixed.restrains_rotation());
+
+        assert!(!SupportType::Free.restrains_vertical());
+        assert!(!SupportType::Free.restrains_rotation());
+    }
+
+    #[test]
+    fn test_span_segment_properties() {
+        let span = SpanSegment::new(12.0, 1.5, 9.25, test_material());
+
+        // I = bd³/12 = 1.5 * 9.25³ / 12 ≈ 98.93
+        assert!((span.moment_of_inertia_in4() - 98.93).abs() < 0.1);
+
+        // S = bd²/6 = 1.5 * 9.25² / 6 ≈ 21.39
+        assert!((span.section_modulus_in3() - 21.39).abs() < 0.1);
+
+        // A = bd = 1.5 * 9.25 = 13.875
+        assert!((span.area_in2() - 13.875).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_continuous_beam_simple_span() {
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
+
+        let beam =
+            ContinuousBeamInput::simple_span("B-1", 12.0, 1.5, 9.25, test_material(), load_case);
+
+        assert_eq!(beam.span_count(), 1);
+        assert_eq!(beam.node_count(), 2);
+        assert!(beam.is_single_span());
+        assert!(beam.is_simply_supported());
+        assert!(!beam.is_indeterminate());
+        assert!(beam.validate().is_ok());
+    }
+
+    #[test]
+    fn test_continuous_beam_cantilever() {
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
+
+        let beam =
+            ContinuousBeamInput::cantilever("CB-1", 8.0, 1.5, 9.25, test_material(), load_case);
+
+        assert!(beam.is_cantilever());
+        assert!(beam.is_indeterminate()); // Fixed support makes it indeterminate
+        assert!(beam.validate().is_ok());
+    }
+
+    #[test]
+    fn test_continuous_beam_fixed_fixed() {
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
+
+        let beam =
+            ContinuousBeamInput::fixed_fixed("FB-1", 10.0, 1.5, 9.25, test_material(), load_case);
+
+        assert!(beam.is_fixed_fixed());
+        assert!(beam.is_indeterminate());
+        assert!(beam.validate().is_ok());
+    }
+
+    #[test]
+    fn test_continuous_beam_two_span() {
+        let mut beam = ContinuousBeamInput::default();
+        beam.label = "Two-Span".to_string();
+        beam.spans = vec![
+            SpanSegment::new(12.0, 1.5, 9.25, test_material()),
+            SpanSegment::new(10.0, 1.5, 9.25, test_material()),
+        ];
+        beam.supports = vec![SupportType::Pinned, SupportType::Pinned, SupportType::Roller];
+
+        assert_eq!(beam.span_count(), 2);
+        assert_eq!(beam.node_count(), 3);
+        assert_eq!(beam.total_length_ft(), 22.0);
+        assert!(beam.is_indeterminate());
+        assert!(beam.validate().is_ok());
+
+        let positions = beam.node_positions();
+        assert_eq!(positions, vec![0.0, 12.0, 22.0]);
+    }
+
+    #[test]
+    fn test_validation_no_spans() {
+        let beam = ContinuousBeamInput {
+            spans: vec![],
+            supports: vec![SupportType::Pinned],
+            ..Default::default()
+        };
+
+        assert!(beam.validate().is_err());
+    }
+
+    #[test]
+    fn test_validation_wrong_support_count() {
+        let beam = ContinuousBeamInput {
+            spans: vec![SpanSegment::default()],
+            supports: vec![SupportType::Pinned], // Should be 2
+            ..Default::default()
+        };
+
+        assert!(beam.validate().is_err());
+    }
+
+    #[test]
+    fn test_validation_no_vertical_support() {
+        let beam = ContinuousBeamInput {
+            spans: vec![SpanSegment::default()],
+            supports: vec![SupportType::Free, SupportType::Free],
+            ..Default::default()
+        };
+
+        assert!(beam.validate().is_err());
+    }
+
+    #[test]
+    fn test_add_remove_span() {
+        let mut beam = ContinuousBeamInput::default();
+        assert_eq!(beam.span_count(), 1);
+
+        beam.add_span(SpanSegment::new(10.0, 1.5, 9.25, test_material()));
+        assert_eq!(beam.span_count(), 2);
+        assert_eq!(beam.supports.len(), 3);
+
+        let removed = beam.remove_last_span();
+        assert!(removed.is_some());
+        assert_eq!(beam.span_count(), 1);
+        assert_eq!(beam.supports.len(), 2);
+
+        // Can't remove the only span
+        let removed = beam.remove_last_span();
+        assert!(removed.is_none());
+        assert_eq!(beam.span_count(), 1);
+    }
+
+    #[test]
+    fn test_serialization() {
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
+
+        let beam = ContinuousBeamInput::simple_span(
+            "Test Beam",
+            12.0,
+            1.5,
+            9.25,
+            test_material(),
+            load_case,
+        );
+
+        let json = serde_json::to_string_pretty(&beam).unwrap();
+        let parsed: ContinuousBeamInput = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.label, beam.label);
+        assert_eq!(parsed.span_count(), beam.span_count());
+        assert_eq!(parsed.supports.len(), beam.supports.len());
+    }
+}

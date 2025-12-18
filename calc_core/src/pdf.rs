@@ -12,7 +12,7 @@
 //!
 //! ```rust,no_run
 //! use calc_core::pdf::render_beam_pdf;
-//! use calc_core::calculations::beam::{BeamInput, calculate};
+//! use calc_core::calculations::continuous_beam::{ContinuousBeamInput, calculate_continuous};
 //! use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 //! use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
 //! use calc_core::nds_factors::AdjustmentFactors;
@@ -21,17 +21,16 @@
 //!     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
 //!     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 //!
-//! let input = BeamInput {
-//!     label: "B-1".to_string(),
-//!     span_ft: 12.0,
+//! let input = ContinuousBeamInput::simple_span(
+//!     "B-1",
+//!     12.0,
+//!     1.5,
+//!     9.25,
+//!     Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 //!     load_case,
-//!     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
-//!     width_in: 1.5,
-//!     depth_in: 9.25,
-//!     adjustment_factors: AdjustmentFactors::default(),
-//! };
+//! );
 //!
-//! let result = calculate(&input, DesignMethod::Asd).unwrap();
+//! let result = calculate_continuous(&input, DesignMethod::Asd).unwrap();
 //! let pdf_bytes = render_beam_pdf(&input, &result, "John Engineer", "25-001").unwrap();
 //! std::fs::write("beam_report.pdf", pdf_bytes).unwrap();
 //! ```
@@ -45,7 +44,7 @@ use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
 use typst_pdf::PdfOptions;
 
-use crate::calculations::beam::{calculate, BeamInput, BeamResult};
+use crate::calculations::continuous_beam::{calculate_continuous, ContinuousBeamInput, ContinuousBeamResult};
 use crate::calculations::CalculationItem;
 use crate::errors::{CalcError, CalcResult};
 use crate::project::Project;
@@ -348,7 +347,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 ///
 /// ```rust,no_run
 /// use calc_core::pdf::render_beam_pdf;
-/// use calc_core::calculations::beam::{BeamInput, calculate};
+/// use calc_core::calculations::continuous_beam::{ContinuousBeamInput, calculate_continuous};
 /// use calc_core::materials::{Material, WoodSpecies, WoodGrade, WoodMaterial};
 /// use calc_core::loads::{EnhancedLoadCase, DiscreteLoad, LoadType, DesignMethod};
 /// use calc_core::nds_factors::AdjustmentFactors;
@@ -357,73 +356,96 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 ///     .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
 ///     .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 ///
-/// let input = BeamInput {
-///     label: "B-1".to_string(),
-///     span_ft: 12.0,
+/// let input = ContinuousBeamInput::simple_span(
+///     "B-1",
+///     12.0,
+///     1.5,
+///     9.25,
+///     Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
 ///     load_case,
-///     material: Material::SawnLumber(WoodMaterial::new(WoodSpecies::DouglasFirLarch, WoodGrade::No2)),
-///     width_in: 1.5,
-///     depth_in: 9.25,
-///     adjustment_factors: AdjustmentFactors::default(),
-/// };
+/// );
 ///
-/// let result = calculate(&input, DesignMethod::Asd).unwrap();
+/// let result = calculate_continuous(&input, DesignMethod::Asd).unwrap();
 /// let pdf = render_beam_pdf(&input, &result, "John Engineer", "25-001").unwrap();
 /// ```
 pub fn render_beam_pdf(
-    input: &BeamInput,
-    result: &BeamResult,
+    input: &ContinuousBeamInput,
+    result: &ContinuousBeamResult,
     engineer: &str,
     job_id: &str,
 ) -> CalcResult<Vec<u8>> {
+    // Use the first span's properties (for single-span beams) or primary span
+    let first_span = input.spans.first().ok_or_else(|| CalcError::invalid_input(
+        "spans",
+        "empty",
+        "At least one span is required",
+    ))?;
+
+    // Get span result for detailed data
+    let span_result = result.span_results.first().ok_or_else(|| CalcError::Internal {
+        message: "No span results available".to_string(),
+    })?;
+
+    // Calculate total design load (from load case)
+    let design_load_plf = input.load_case.total_uniform_plf();
+
+    // Calculate deflection ratio (L/delta)
+    let l_in = input.total_length_ft() * 12.0;
+    let deflection_ratio = if result.max_deflection_in > 0.0 {
+        l_in / result.max_deflection_in
+    } else {
+        9999.0
+    };
+    let deflection_limit_ratio = 240.0; // L/240 for floor beams
+
     // Format the template with calculation data
     let source = BEAM_TEMPLATE
         .replace("{{BEAM_LABEL}}", &input.label)
         .replace("{{ENGINEER}}", engineer)
         .replace("{{JOB_ID}}", job_id)
         .replace("{{DATE}}", &Utc::now().format("%Y-%m-%d").to_string())
-        .replace("{{SPAN_FT}}", &format!("{:.1}", input.span_ft))
-        .replace("{{LOAD_PLF}}", &format!("{:.0}", result.design_load_plf))
-        .replace("{{WIDTH_IN}}", &format!("{:.2}", input.width_in))
-        .replace("{{DEPTH_IN}}", &format!("{:.2}", input.depth_in))
+        .replace("{{SPAN_FT}}", &format!("{:.1}", input.total_length_ft()))
+        .replace("{{LOAD_PLF}}", &format!("{:.0}", design_load_plf))
+        .replace("{{WIDTH_IN}}", &format!("{:.2}", first_span.width_in))
+        .replace("{{DEPTH_IN}}", &format!("{:.2}", first_span.depth_in))
         .replace(
             "{{MATERIAL}}",
-            &input.material.display_name(),
+            &first_span.material.display_name(),
         )
-        .replace("{{SECTION_MODULUS}}", &format!("{:.2}", result.section_modulus_in3))
-        .replace("{{MOMENT_INERTIA}}", &format!("{:.2}", result.moment_of_inertia_in4))
-        .replace("{{FB_REF}}", &format!("{:.0}", result.fb_reference_psi))
-        .replace("{{FV_REF}}", &format!("{:.0}", result.fv_reference_psi))
-        .replace("{{E_REF}}", &format!("{:.0}", result.e_psi))
-        .replace("{{MOMENT_FTLB}}", &format!("{:.0}", result.max_moment_ftlb))
+        .replace("{{SECTION_MODULUS}}", &format!("{:.2}", first_span.section_modulus_in3()))
+        .replace("{{MOMENT_INERTIA}}", &format!("{:.2}", first_span.moment_of_inertia_in4()))
+        .replace("{{FB_REF}}", &format!("{:.0}", first_span.material.base_properties().fb_psi))
+        .replace("{{FV_REF}}", &format!("{:.0}", first_span.material.base_properties().fv_psi))
+        .replace("{{E_REF}}", &format!("{:.0}", first_span.e_psi()))
+        .replace("{{MOMENT_FTLB}}", &format!("{:.0}", result.max_positive_moment_ftlb))
         .replace("{{SHEAR_LB}}", &format!("{:.0}", result.max_shear_lb))
         .replace("{{DEFLECTION_IN}}", &format!("{:.3}", result.max_deflection_in))
-        .replace("{{FB_ACTUAL}}", &format!("{:.0}", result.actual_fb_psi))
-        .replace("{{FB_ALLOW}}", &format!("{:.0}", result.allowable_fb_psi))
-        .replace("{{BENDING_UNITY}}", &format!("{:.2}", result.bending_unity))
+        .replace("{{FB_ACTUAL}}", &format!("{:.0}", span_result.actual_fb_psi))
+        .replace("{{FB_ALLOW}}", &format!("{:.0}", span_result.allowable_fb_psi))
+        .replace("{{BENDING_UNITY}}", &format!("{:.2}", span_result.bending_unity))
         .replace(
             "{{BENDING_STATUS}}",
-            if result.bending_unity <= 1.0 { "OK" } else { "FAIL" },
+            if span_result.bending_unity <= 1.0 { "OK" } else { "FAIL" },
         )
-        .replace("{{FV_ACTUAL}}", &format!("{:.0}", result.actual_fv_psi))
-        .replace("{{FV_ALLOW}}", &format!("{:.0}", result.allowable_fv_psi))
-        .replace("{{SHEAR_UNITY}}", &format!("{:.2}", result.shear_unity))
+        .replace("{{FV_ACTUAL}}", &format!("{:.0}", span_result.actual_fv_psi))
+        .replace("{{FV_ALLOW}}", &format!("{:.0}", span_result.allowable_fv_psi))
+        .replace("{{SHEAR_UNITY}}", &format!("{:.2}", span_result.shear_unity))
         .replace(
             "{{SHEAR_STATUS}}",
-            if result.shear_unity <= 1.0 { "OK" } else { "FAIL" },
+            if span_result.shear_unity <= 1.0 { "OK" } else { "FAIL" },
         )
-        .replace("{{DEFL_RATIO}}", &format!("{:.0}", result.deflection_ratio))
-        .replace("{{DEFL_LIMIT}}", &format!("{:.0}", result.deflection_limit_ratio))
-        .replace("{{DEFL_UNITY}}", &format!("{:.2}", result.deflection_unity))
+        .replace("{{DEFL_RATIO}}", &format!("{:.0}", deflection_ratio))
+        .replace("{{DEFL_LIMIT}}", &format!("{:.0}", deflection_limit_ratio))
+        .replace("{{DEFL_UNITY}}", &format!("{:.2}", span_result.deflection_unity))
         .replace(
             "{{DEFL_STATUS}}",
-            if result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
+            if span_result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
         )
         .replace(
             "{{OVERALL_PASS}}",
             if result.passes() { "PASS" } else { "FAIL" },
         )
-        .replace("{{GOVERNING}}", result.governing_condition());
+        .replace("{{GOVERNING}}", &result.governing_condition);
 
     // Compile the Typst document
     let world = PdfWorld::new(source);
@@ -473,12 +495,12 @@ pub fn render_beam_pdf(
 /// ```
 pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
     // Collect all beams and calculate their results
-    let mut beams: Vec<(&BeamInput, BeamResult)> = Vec::new();
+    let mut beams: Vec<(&ContinuousBeamInput, ContinuousBeamResult)> = Vec::new();
     let design_method = project.settings.design_method;
 
     for item in project.items.values() {
         if let CalculationItem::Beam(beam) = item {
-            match calculate(beam, design_method) {
+            match calculate_continuous(beam, design_method) {
                 Ok(result) => beams.push((beam, result)),
                 Err(e) => {
                     return Err(CalcError::Internal {
@@ -583,6 +605,26 @@ pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
 
     // Add individual beam pages
     for (i, (input, result)) in beams.iter().enumerate() {
+        // Get first span's properties
+        let first_span = match input.spans.first() {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Get first span result
+        let span_result = match result.span_results.first() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let design_load_plf = input.load_case.total_uniform_plf();
+        let l_in = input.total_length_ft() * 12.0;
+        let deflection_ratio = if result.max_deflection_in > 0.0 {
+            l_in / result.max_deflection_in
+        } else {
+            9999.0
+        };
+
         source.push_str(&format!(
             r##"
 #pagebreak()
@@ -590,7 +632,7 @@ pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
 // Beam {} of {}
 #align(center)[
   #block(width: 100%, fill: rgb("#f0f0f0"), inset: 12pt, radius: 4pt)[
-    #text(size: 18pt, weight: "bold")[Simply-Supported Beam Analysis]
+    #text(size: 18pt, weight: "bold")[Beam Analysis]
     #v(4pt)
     #text(size: 14pt)[{beam_label}]
   ]
@@ -606,7 +648,7 @@ pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
   stroke: 0.5pt,
   align: (left, right, left),
   table.header([*Parameter*], [*Value*], [*Unit*]),
-  [Clear Span], [{span_ft}], [ft],
+  [Total Span], [{span_ft}], [ft],
   [Uniform Load], [{load_plf}], [plf],
   [Beam Width], [{width_in}], [in],
   [Beam Depth], [{depth_in}], [in],
@@ -648,13 +690,11 @@ pub fn render_project_pdf(project: &Project) -> CalcResult<Vec<u8>> {
 
 === Applied Forces (Demand)
 
-For a simply-supported beam with uniform load:
+$ M_"max" = {moment_ftlb} "ft-lb" $
 
-$ M_"max" = (w L^2) / 8 = {moment_ftlb} "ft-lb" $
+$ V_"max" = {shear_lb} "lb" $
 
-$ V_"max" = (w L) / 2 = {shear_lb} "lb" $
-
-$ delta_"max" = (5 w L^4) / (384 E I) = {deflection_in} "in" $
+$ delta_"max" = {deflection_in} "in" $
 
 #v(12pt)
 
@@ -689,31 +729,31 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {deflection_in} "in" $
             i + 1,
             beams.len(),
             beam_label = escape_typst(&input.label),
-            span_ft = format!("{:.1}", input.span_ft),
-            load_plf = format!("{:.0}", result.design_load_plf),
-            width_in = format!("{:.2}", input.width_in),
-            depth_in = format!("{:.2}", input.depth_in),
-            material = input.material.display_name(),
-            section_modulus = format!("{:.2}", result.section_modulus_in3),
-            moment_inertia = format!("{:.2}", result.moment_of_inertia_in4),
-            fb_ref = format!("{:.0}", result.fb_reference_psi),
-            fv_ref = format!("{:.0}", result.fv_reference_psi),
-            e_ref = format!("{:.0}", result.e_psi),
-            moment_ftlb = format!("{:.0}", result.max_moment_ftlb),
+            span_ft = format!("{:.1}", input.total_length_ft()),
+            load_plf = format!("{:.0}", design_load_plf),
+            width_in = format!("{:.2}", first_span.width_in),
+            depth_in = format!("{:.2}", first_span.depth_in),
+            material = first_span.material.display_name(),
+            section_modulus = format!("{:.2}", first_span.section_modulus_in3()),
+            moment_inertia = format!("{:.2}", first_span.moment_of_inertia_in4()),
+            fb_ref = format!("{:.0}", first_span.material.base_properties().fb_psi),
+            fv_ref = format!("{:.0}", first_span.material.base_properties().fv_psi),
+            e_ref = format!("{:.0}", first_span.e_psi()),
+            moment_ftlb = format!("{:.0}", result.max_positive_moment_ftlb),
             shear_lb = format!("{:.0}", result.max_shear_lb),
             deflection_in = format!("{:.3}", result.max_deflection_in),
-            fb_actual = format!("{:.0}", result.actual_fb_psi),
-            fb_allow = format!("{:.0}", result.allowable_fb_psi),
-            bending_unity = format!("{:.2}", result.bending_unity),
-            bending_status = if result.bending_unity <= 1.0 { "OK" } else { "FAIL" },
-            fv_actual = format!("{:.0}", result.actual_fv_psi),
-            fv_allow = format!("{:.0}", result.allowable_fv_psi),
-            shear_unity = format!("{:.2}", result.shear_unity),
-            shear_status = if result.shear_unity <= 1.0 { "OK" } else { "FAIL" },
-            defl_ratio = format!("{:.0}", result.deflection_ratio),
-            defl_limit = format!("{:.0}", result.deflection_limit_ratio),
-            defl_unity = format!("{:.2}", result.deflection_unity),
-            defl_status = if result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
+            fb_actual = format!("{:.0}", span_result.actual_fb_psi),
+            fb_allow = format!("{:.0}", span_result.allowable_fb_psi),
+            bending_unity = format!("{:.2}", span_result.bending_unity),
+            bending_status = if span_result.bending_unity <= 1.0 { "OK" } else { "FAIL" },
+            fv_actual = format!("{:.0}", span_result.actual_fv_psi),
+            fv_allow = format!("{:.0}", span_result.allowable_fv_psi),
+            shear_unity = format!("{:.2}", span_result.shear_unity),
+            shear_status = if span_result.shear_unity <= 1.0 { "OK" } else { "FAIL" },
+            defl_ratio = format!("{:.0}", deflection_ratio),
+            defl_limit = format!("{:.0}", 240.0),
+            defl_unity = format!("{:.2}", span_result.deflection_unity),
+            defl_status = if span_result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
             status_color = if result.passes() {
                 "rgb(\"#d4edda\")"
             } else {
@@ -724,7 +764,7 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {deflection_in} "in" $
             } else {
                 "DESIGN INADEQUATE"
             },
-            governing = result.governing_condition(),
+            governing = &result.governing_condition,
         ));
     }
 
@@ -769,15 +809,12 @@ fn escape_typst(s: &str) -> String {
 }
 
 /// Build summary table rows for the cover page
-fn build_summary_rows(beams: &[(&BeamInput, BeamResult)]) -> String {
+fn build_summary_rows(beams: &[(&ContinuousBeamInput, ContinuousBeamResult)]) -> String {
     beams
         .iter()
         .enumerate()
         .map(|(i, (input, result))| {
-            let max_unity = result
-                .bending_unity
-                .max(result.shear_unity)
-                .max(result.deflection_unity);
+            let max_unity = result.governing_unity;
             let status = if result.passes() { "OK" } else { "FAIL" };
             format!(
                 "  [{}], [Beam: {}], [{:.2}], [{}],",
@@ -794,7 +831,6 @@ fn build_summary_rows(beams: &[(&BeamInput, BeamResult)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calculations::beam::calculate;
     use crate::loads::{DesignMethod, EnhancedLoadCase, DiscreteLoad, LoadType};
     use crate::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
@@ -804,20 +840,19 @@ mod tests {
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 30.0))
             .with_load(DiscreteLoad::uniform(LoadType::Live, 70.0));
 
-        let input = BeamInput {
-            label: "B-1 Test Beam".to_string(),
-            span_ft: 12.0,
-            load_case,
-            material: Material::SawnLumber(WoodMaterial::new(
+        let input = ContinuousBeamInput::simple_span(
+            "B-1 Test Beam",
+            12.0,
+            1.5,
+            9.25,
+            Material::SawnLumber(WoodMaterial::new(
                 WoodSpecies::DouglasFirLarch,
                 WoodGrade::No2,
             )),
-            width_in: 1.5,
-            depth_in: 9.25,
-            adjustment_factors: crate::nds_factors::AdjustmentFactors::default(),
-        };
+            load_case,
+        );
 
-        let result = calculate(&input, DesignMethod::Asd).unwrap();
+        let result = calculate_continuous(&input, DesignMethod::Asd).unwrap();
         let pdf = render_beam_pdf(&input, &result, "Test Engineer", "TEST-001");
 
         // Should succeed

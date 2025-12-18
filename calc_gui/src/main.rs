@@ -19,7 +19,9 @@ use iced::{
 };
 use uuid::Uuid;
 
-use calc_core::calculations::beam::{calculate, BeamInput, BeamResult};
+use calc_core::calculations::continuous_beam::{
+    calculate_continuous, ContinuousBeamInput, ContinuousBeamResult, SpanSegment, SupportType,
+};
 use calc_core::calculations::CalculationItem;
 use calc_core::file_io::{load_project, save_project, FileLock};
 use calc_core::loads::{DiscreteLoad, EnhancedLoadCase, LoadDistribution, LoadType};
@@ -281,8 +283,8 @@ struct App {
     compression_edge_braced: bool,
 
     // Calculation results (store input too for diagram plotting)
-    calc_input: Option<BeamInput>,
-    result: Option<BeamResult>,
+    calc_input: Option<ContinuousBeamInput>,
+    result: Option<ContinuousBeamResult>,
     error_message: Option<String>,
     diagram_cache: canvas::Cache,
 
@@ -946,9 +948,35 @@ impl App {
             if let CalculationItem::Beam(beam) = item {
                 self.selection = EditorSelection::Beam(Some(id));
                 self.beam_label = beam.label.clone();
-                self.span_ft = beam.span_ft.to_string();
-                self.width_in = beam.width_in.to_string();
-                self.depth_in = beam.depth_in.to_string();
+
+                // Use first span's properties (for single-span beams)
+                if let Some(first_span) = beam.spans.first() {
+                    self.span_ft = first_span.length_ft.to_string();
+                    self.width_in = first_span.width_in.to_string();
+                    self.depth_in = first_span.depth_in.to_string();
+
+                    // Extract material-specific fields from first span
+                    match &first_span.material {
+                        Material::SawnLumber(wood) => {
+                            self.selected_material_type = MaterialType::SawnLumber;
+                            self.selected_species = Some(wood.species);
+                            self.selected_grade = Some(wood.grade);
+                        }
+                        Material::Glulam(glulam) => {
+                            self.selected_material_type = MaterialType::Glulam;
+                            self.selected_glulam_class = Some(glulam.stress_class);
+                            self.selected_glulam_layup = Some(glulam.layup);
+                        }
+                        Material::Lvl(lvl) => {
+                            self.selected_material_type = MaterialType::Lvl;
+                            self.selected_lvl_grade = Some(lvl.grade);
+                        }
+                        Material::Psl(psl) => {
+                            self.selected_material_type = MaterialType::Psl;
+                            self.selected_psl_grade = Some(psl.grade);
+                        }
+                    }
+                }
 
                 // Populate load table from beam's load_case
                 self.load_table = beam
@@ -958,28 +986,6 @@ impl App {
                     .map(LoadTableRow::from_discrete_load)
                     .collect();
                 self.include_self_weight = beam.load_case.include_self_weight;
-
-                // Extract material-specific fields
-                match &beam.material {
-                    Material::SawnLumber(wood) => {
-                        self.selected_material_type = MaterialType::SawnLumber;
-                        self.selected_species = Some(wood.species);
-                        self.selected_grade = Some(wood.grade);
-                    }
-                    Material::Glulam(glulam) => {
-                        self.selected_material_type = MaterialType::Glulam;
-                        self.selected_glulam_class = Some(glulam.stress_class);
-                        self.selected_glulam_layup = Some(glulam.layup);
-                    }
-                    Material::Lvl(lvl) => {
-                        self.selected_material_type = MaterialType::Lvl;
-                        self.selected_lvl_grade = Some(lvl.grade);
-                    }
-                    Material::Psl(psl) => {
-                        self.selected_material_type = MaterialType::Psl;
-                        self.selected_psl_grade = Some(psl.grade);
-                    }
-                }
 
                 // Extract adjustment factors
                 self.selected_load_duration = beam.adjustment_factors.load_duration;
@@ -1048,19 +1054,18 @@ impl App {
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 15.0))
             .with_load(DiscreteLoad::uniform(LoadType::Live, 40.0));
 
-        // Create beam with defaults
-        let beam = BeamInput {
-            label: new_label.clone(),
-            span_ft: 12.0,
-            load_case,
-            material: Material::SawnLumber(WoodMaterial::new(
+        // Create beam with defaults using ContinuousBeamInput::simple_span
+        let beam = ContinuousBeamInput::simple_span(
+            new_label.clone(),
+            12.0,
+            1.5,
+            9.25,
+            Material::SawnLumber(WoodMaterial::new(
                 WoodSpecies::DouglasFirLarch,
                 WoodGrade::No2,
             )),
-            width_in: 1.5,
-            depth_in: 9.25,
-            adjustment_factors: calc_core::nds_factors::AdjustmentFactors::default(),
-        };
+            load_case,
+        );
 
         // Add to project and get the ID
         let id = self.project.add_item(CalculationItem::Beam(beam));
@@ -1159,15 +1164,16 @@ impl App {
             unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
         };
 
-        let beam = BeamInput {
-            label: self.beam_label.clone(),
+        // Create ContinuousBeamInput with a single span
+        let mut beam = ContinuousBeamInput::simple_span(
+            self.beam_label.clone(),
             span_ft,
-            load_case,
-            material,
             width_in,
             depth_in,
-            adjustment_factors,
-        };
+            material,
+            load_case,
+        );
+        beam.adjustment_factors = adjustment_factors;
 
         // Update the beam in the project
         self.project.items.insert(beam_id, CalculationItem::Beam(beam));
@@ -1283,20 +1289,20 @@ impl App {
             unbraced_length_in: None, // TODO: Add UI for unbraced length if not braced
         };
 
-        // Build input
-        let input = BeamInput {
-            label: self.beam_label.clone(),
+        // Build ContinuousBeamInput with single span
+        let mut input = ContinuousBeamInput::simple_span(
+            self.beam_label.clone(),
             span_ft,
-            load_case,
-            material,
             width_in,
             depth_in,
-            adjustment_factors,
-        };
+            material,
+            load_case,
+        );
+        input.adjustment_factors = adjustment_factors;
 
         // Run calculation
         let design_method = self.project.settings.design_method;
-        match calculate(&input, design_method) {
+        match calculate_continuous(&input, design_method) {
             Ok(result) => {
                 self.calc_input = Some(input);
                 self.result = Some(result);
@@ -2087,37 +2093,51 @@ impl App {
         ]
     }
 
-    fn view_calculation_results(&self, result: &BeamResult) -> Column<'_, Message> {
+    fn view_calculation_results(&self, result: &ContinuousBeamResult) -> Column<'_, Message> {
         let pass_fail = if result.passes() {
             text("DESIGN ADEQUATE").size(16).color([0.2, 0.6, 0.2])
         } else {
             text("DESIGN INADEQUATE").size(16).color([0.8, 0.2, 0.2])
         };
 
-        let governing = text(format!("Governing: {}", result.governing_condition())).size(11);
+        let governing = text(format!("Governing: {}", result.governing_condition)).size(11);
 
-        let bending_status = if result.bending_unity <= 1.0 {
-            "OK"
+        // Get first span result for detailed stress checks (single-span case)
+        let span_result = result.span_results.first();
+
+        let (bending_status, bending_unity, actual_fb, allowable_fb) = span_result
+            .map(|sr| {
+                let status = if sr.bending_unity <= 1.0 { "OK" } else { "FAIL" };
+                (status, sr.bending_unity, sr.actual_fb_psi, sr.allowable_fb_psi)
+            })
+            .unwrap_or(("N/A", 0.0, 0.0, 0.0));
+
+        let (shear_status, shear_unity, actual_fv, allowable_fv) = span_result
+            .map(|sr| {
+                let status = if sr.shear_unity <= 1.0 { "OK" } else { "FAIL" };
+                (status, sr.shear_unity, sr.actual_fv_psi, sr.allowable_fv_psi)
+            })
+            .unwrap_or(("N/A", 0.0, 0.0, 0.0));
+
+        let (defl_status, defl_unity) = span_result
+            .map(|sr| {
+                let status = if sr.deflection_unity <= 1.0 { "OK" } else { "FAIL" };
+                (status, sr.deflection_unity)
+            })
+            .unwrap_or(("N/A", 0.0));
+
+        // Get reactions (for single span: left and right reactions)
+        let (r_left, r_right) = if result.reactions.len() >= 2 {
+            (result.reactions[0], result.reactions[result.reactions.len() - 1])
         } else {
-            "FAIL"
-        };
-        let shear_status = if result.shear_unity <= 1.0 {
-            "OK"
-        } else {
-            "FAIL"
-        };
-        let defl_status = if result.deflection_unity <= 1.0 {
-            "OK"
-        } else {
-            "FAIL"
+            (0.0, 0.0)
         };
 
-        // Build load info section
-        let self_weight_text = if result.self_weight_plf > 0.0 {
-            format!(" (incl. self-wt: {:.1} plf)", result.self_weight_plf)
-        } else {
-            String::new()
-        };
+        // Get section properties from input if available
+        let (section_modulus, moment_inertia) = self.calc_input.as_ref()
+            .and_then(|input| input.spans.first())
+            .map(|span| (span.section_modulus_in3(), span.moment_of_inertia_in4()))
+            .unwrap_or((0.0, 0.0));
 
         column![
             text("Calculation Results").size(14),
@@ -2126,11 +2146,10 @@ impl App {
             governing,
             Space::new().height(12),
             text("Load Summary").size(12),
-            text(format!("Design Load: {:.1} plf{}", result.design_load_plf, self_weight_text)).size(11),
             text(format!("Governing Combo: {}", result.governing_combination)).size(11),
             Space::new().height(12),
             text("Demand").size(12),
-            text(format!("Max Moment: {:.0} ft-lb", result.max_moment_ftlb)).size(11),
+            text(format!("Max Moment: {:.0} ft-lb", result.max_positive_moment_ftlb)).size(11),
             text(format!("Max Shear: {:.0} lb", result.max_shear_lb)).size(11),
             text(format!(
                 "Max Deflection: {:.3} in",
@@ -2141,19 +2160,17 @@ impl App {
             text("Capacity Checks").size(12),
             text(format!(
                 "Bending: {:.0}/{:.0} psi = {:.2} [{}]",
-                result.actual_fb_psi, result.allowable_fb_psi, result.bending_unity, bending_status
+                actual_fb, allowable_fb, bending_unity, bending_status
             ))
             .size(11),
             text(format!(
                 "Shear: {:.0}/{:.0} psi = {:.2} [{}]",
-                result.actual_fv_psi, result.allowable_fv_psi, result.shear_unity, shear_status
+                actual_fv, allowable_fv, shear_unity, shear_status
             ))
             .size(11),
             text(format!(
-                "Deflection: L/{:.0} vs L/{:.0} = {:.2} [{}]",
-                result.deflection_ratio,
-                result.deflection_limit_ratio,
-                result.deflection_unity,
+                "Deflection: {:.2} [{}]",
+                defl_unity,
                 defl_status
             ))
             .size(11),
@@ -2161,19 +2178,19 @@ impl App {
             text("Section Properties").size(12),
             text(format!(
                 "Section Modulus (S): {:.2} in³",
-                result.section_modulus_in3
+                section_modulus
             ))
             .size(11),
             text(format!(
                 "Moment of Inertia (I): {:.2} in⁴",
-                result.moment_of_inertia_in4
+                moment_inertia
             ))
             .size(11),
             Space::new().height(12),
             text("Support Reactions").size(12),
             text(format!(
                 "Max: R_L = {:.0} lb, R_R = {:.0} lb",
-                result.reaction_left_lb, result.reaction_right_lb
+                r_left, r_right
             ))
             .size(11),
             text(format!("  ({})", result.governing_combination)).size(10),
@@ -2181,12 +2198,18 @@ impl App {
         ]
     }
 
-    fn view_min_reactions(&self, result: &BeamResult) -> Element<'_, Message> {
-        let has_uplift = result.min_reaction_left_lb < 0.0 || result.min_reaction_right_lb < 0.0;
+    fn view_min_reactions(&self, result: &ContinuousBeamResult) -> Element<'_, Message> {
+        let (min_r_left, min_r_right) = if result.min_reactions.len() >= 2 {
+            (result.min_reactions[0], result.min_reactions[result.min_reactions.len() - 1])
+        } else {
+            (0.0, 0.0)
+        };
+
+        let has_uplift = min_r_left < 0.0 || min_r_right < 0.0;
 
         let min_reactions_text = text(format!(
             "Min: R_L = {:.0} lb, R_R = {:.0} lb",
-            result.min_reaction_left_lb, result.min_reaction_right_lb
+            min_r_left, min_r_right
         ))
         .size(11);
 
@@ -2197,7 +2220,7 @@ impl App {
                 .size(11)
                 .color([0.9, 0.5, 0.0]);
 
-            let uplift_value = result.min_reaction_left_lb.min(result.min_reaction_right_lb);
+            let uplift_value = min_r_left.min(min_r_right);
             let uplift_detail = text(format!(
                 "Net uplift: {:.0} lb",
                 uplift_value.abs()
@@ -2287,14 +2310,21 @@ struct BeamDiagramData {
 }
 
 impl BeamDiagramData {
-    fn from_calc(input: &BeamInput, result: &BeamResult) -> Self {
+    fn from_calc(input: &ContinuousBeamInput, result: &ContinuousBeamResult) -> Self {
+        // Get reactions from reactions vector
+        let (r_left, r_right) = if result.reactions.len() >= 2 {
+            (result.reactions[0], result.reactions[result.reactions.len() - 1])
+        } else {
+            (0.0, 0.0)
+        };
+
         Self {
-            span_ft: input.span_ft,
-            load_plf: result.design_load_plf,
+            span_ft: input.total_length_ft(),
+            load_plf: input.load_case.total_uniform_plf(),
             max_shear_lb: result.max_shear_lb,
-            reaction_left_lb: result.reaction_left_lb,
-            reaction_right_lb: result.reaction_right_lb,
-            max_moment_ftlb: result.max_moment_ftlb,
+            reaction_left_lb: r_left,
+            reaction_right_lb: r_right,
+            max_moment_ftlb: result.max_positive_moment_ftlb,
             max_deflection_in: result.max_deflection_in,
             shear_diagram: result.shear_diagram.clone(),
             moment_diagram: result.moment_diagram.clone(),

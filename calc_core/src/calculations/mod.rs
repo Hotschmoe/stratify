@@ -16,13 +16,15 @@
 //!
 //! ## Available Calculations
 //!
-//! - [`beam`] - Simply-supported beam analysis (wood)
+//! - [`continuous_beam`] - Multi-span beam analysis with configurable supports
 //! - [`beam_analysis`] - Detailed beam analysis with superposition
 //! - [`column`] - Axial compression member analysis (wood)
 
 pub mod beam;
 pub mod beam_analysis;
 pub mod column;
+pub mod continuous_beam;
+pub mod moment_distribution;
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +32,10 @@ use serde::{Deserialize, Serialize};
 pub use beam::{BeamInput, BeamResult};
 pub use beam_analysis::{AnalysisResults, BeamAnalysis, SingleLoad};
 pub use column::{ColumnInput, ColumnResult};
+pub use continuous_beam::{
+    calculate_continuous, ContinuousBeamInput, ContinuousBeamResult, SpanResult, SpanSegment,
+    SupportType,
+};
 
 /// Enum wrapper for all calculation types.
 ///
@@ -38,8 +44,12 @@ pub use column::{ColumnInput, ColumnResult};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CalculationItem {
-    /// Simply-supported beam calculation
-    Beam(BeamInput),
+    /// Multi-span continuous beam calculation
+    ///
+    /// Supports single-span simply-supported, cantilever, fixed-fixed,
+    /// propped cantilever, and multi-span continuous beams with any
+    /// combination of support conditions.
+    Beam(ContinuousBeamInput),
     /// Axial compression column calculation
     Column(ColumnInput),
     // Future: ShearWall(ShearWallInput),
