@@ -211,7 +211,7 @@ fn main() -> iced::Result {
     iced::application("Stratify - Structural Engineering", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| Theme::Light)
-        .window_size((1000.0, 750.0))
+        .window_size((1200.0, 750.0))
         .font(BERKELEY_MONO)
         .font(BERKELEY_MONO_BOLD)
         .default_font(Font::with_name("Berkeley Mono"))
@@ -1574,7 +1574,7 @@ impl App {
             }
         };
 
-        container(scrollable(panel.width(Length::FillPortion(2)).padding(8)))
+        container(scrollable(panel.width(Length::FillPortion(3)).padding(8)))
             .style(container::bordered_box)
             .padding(5)
             .into()
