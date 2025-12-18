@@ -12,7 +12,7 @@ use crate::{App, EditorSelection, Message};
 use super::{input_project_info, input_wood_beam};
 
 /// Render the input panel based on current selection
-pub fn view_input_panel(app: &App) -> Element<'_, Message> {
+pub fn view_input_panel(app: &App, width: f32) -> Element<'_, Message> {
     let panel: Column<'_, Message> = match app.selection {
         EditorSelection::ProjectInfo => {
             input_project_info::view(&app.project.meta)
@@ -27,7 +27,7 @@ pub fn view_input_panel(app: &App) -> Element<'_, Message> {
         }
     };
 
-    container(scrollable(panel.width(Length::FillPortion(3)).padding(8)))
+    container(scrollable(panel.width(Length::Fixed(width)).padding(8)))
         .style(container::bordered_box)
         .padding(5)
         .into()

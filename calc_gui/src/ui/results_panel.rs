@@ -29,7 +29,7 @@ pub fn view_results_panel(app: &App) -> Element<'_, Message> {
     };
 
     let panel = container(scrollable(content.padding(8)))
-        .width(Length::FillPortion(3))
+        .width(Length::Fill)
         .style(container::bordered_box)
         .padding(5);
 

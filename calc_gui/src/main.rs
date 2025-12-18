@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::canvas;
-use iced::widget::{column, container, row, rule, Space, operation};
-use iced::{event, Element, Event, Font, Length, Subscription, Task, Theme};
+use iced::widget::{column, container, row, rule, Space, operation, mouse_area};
+use iced::{event, mouse, Element, Event, Font, Length, Subscription, Task, Theme, Point};
 use uuid::Uuid;
 
 use calc_core::calculations::continuous_beam::{
@@ -114,6 +114,13 @@ pub enum EditorSelection {
     ProjectInfo,
     /// Editing a beam (existing or new)
     Beam(Option<Uuid>),
+}
+
+/// Panel being resized
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizingPanel {
+    Left,
+    Right,
 }
 
 /// A row in the span table (for multi-span beams)
@@ -323,6 +330,11 @@ pub struct App {
     // Settings
     pub dark_mode: bool,
     pub settings_menu_open: bool,
+
+    // Layout
+    pub items_panel_width: f32,
+    pub input_panel_width: f32,
+    pub resizing_panel: Option<ResizingPanel>,
 }
 
 impl Default for App {
@@ -399,6 +411,9 @@ impl Default for App {
             status: "Ready - New Project".to_string(),
             dark_mode: false,
             settings_menu_open: false,
+            items_panel_width: 200.0,
+            input_panel_width: 500.0,
+            resizing_panel: None,
         }
     }
 }
@@ -528,6 +543,11 @@ pub enum Message {
     // Settings
     ToggleSettingsMenu,
     ToggleDarkMode,
+
+    // Resizing
+    SplitterPressed(ResizingPanel),
+    SplitterReleased,
+    MouseMoved(Point),
 }
 
 // ============================================================================
@@ -536,7 +556,7 @@ pub enum Message {
 
 impl App {
     fn subscription(&self) -> Subscription<Message> {
-        event::listen_with(|event, _status, _id| match event {
+        let event_subscription = event::listen_with(|event, _status, _id| match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 if key == Key::Named(keyboard::key::Named::Tab) {
                     if modifiers.shift() {
@@ -547,8 +567,19 @@ impl App {
                 }
                 Some(Message::KeyPressed(key, modifiers))
             }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                Some(Message::MouseMoved(position))
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                None // Handled by widgets
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Message::SplitterReleased)
+            }
             _ => None,
-        })
+        });
+
+        event_subscription
     }
 }
 
@@ -879,6 +910,46 @@ impl App {
                 self.dark_mode = !self.dark_mode;
                 self.settings_menu_open = false; // Close menu after toggling
                 self.diagram_cache.clear();
+            }
+
+            Message::SplitterPressed(panel) => {
+                self.resizing_panel = Some(panel);
+            }
+            Message::SplitterReleased => {
+                self.resizing_panel = None;
+            }
+            Message::MouseMoved(position) => {
+                if let Some(panel) = self.resizing_panel {
+                    match panel {
+                        ResizingPanel::Left => {
+                            // Adjust items panel width
+                            // We need to account for padding/margins if necessary, but roughly:
+                            // The items panel is at the left. So position.x is roughly the width.
+                            // We might need to subtract the padding (15) and spacing if we want exact.
+                            // But usually dragging feels better if it tracks the mouse.
+                            let new_width = position.x - 15.0; // Subtract left padding
+                            if new_width >= 150.0 && new_width <= 400.0 {
+                                self.items_panel_width = new_width;
+                            }
+                        }
+                        ResizingPanel::Right => {
+                            // Adjust input panel width.
+                            // The right splitter is at items_width + input_width + padding + spacing.
+                            // So input_width = mouse_x - items_width - padding - spacing.
+                            // items_panel (15 padding + width) + splitter (say 10 spacing) + input + splitter
+                            // Let's approximate:
+                            // mouse_x is the position of the second splitter.
+                            // input_width = mouse_x - (15 + items_panel_width + 10)
+                            let start_of_input = 15.0 + self.items_panel_width + 10.0;
+                            let new_width = position.x - start_of_input;
+
+                            // 300.0 min width for input panel
+                            if new_width >= 300.0 {
+                                self.input_panel_width = new_width;
+                            }
+                        }
+                    }
+                }
             }
         }
         Task::none()
@@ -1451,11 +1522,14 @@ impl App {
                 &self.collapsed_sections,
                 &self.selection,
                 self.selected_beam_id(),
+                self.items_panel_width,
             ),
-            ui::input_panel::view_input_panel(self),
+            view_splitter(ResizingPanel::Left, self.resizing_panel == Some(ResizingPanel::Left)),
+            ui::input_panel::view_input_panel(self, self.input_panel_width),
+            view_splitter(ResizingPanel::Right, self.resizing_panel == Some(ResizingPanel::Right)),
             ui::results_panel::view_results_panel(self),
         ]
-        .spacing(10);
+        .spacing(0); // Spacing handled by splitters
 
         let main_content = column![
             header,
@@ -1480,4 +1554,32 @@ impl App {
             .height(Length::Fill)
             .into()
     }
+}
+
+fn view_splitter(panel: ResizingPanel, is_resizing: bool) -> Element<'static, Message> {
+    let color = if is_resizing {
+        [0.5, 0.5, 0.5]
+    } else {
+        [0.8, 0.8, 0.8]
+    };
+
+    mouse_area(
+        container(
+            container(Space::new())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(move |_theme| {
+                    container::Style {
+                        background: Some(iced::Background::Color(color.into())),
+                        ..Default::default()
+                    }
+                })
+        )
+        .width(Length::Fixed(10.0))
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+    )
+    .on_press(Message::SplitterPressed(panel))
+    .on_release(Message::SplitterReleased)
+    .into()
 }
