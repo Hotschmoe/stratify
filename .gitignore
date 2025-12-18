@@ -3,6 +3,8 @@
 debug/
 target/
 
+.claude/
+
 calc_core/project.stf
 calc_core/project.stf.lock
 
