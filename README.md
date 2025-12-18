@@ -290,10 +290,12 @@ The MVP uses hardcoded placeholder values for common materials. This is sufficie
 
 ### Load Analysis
 
-- **Load Combinations**: ASCE 7 (ASD/LRFD)
+- **Load Combinations**: ASCE 7 ASD (21 combinations) and LRFD (23 combinations)
+- **Wind Uplift**: ±W combinations for anchor/hold-down design
 - **Wind Loads**: ASCE 7 Chapter 30
 - **Seismic Loads**: ASCE 7 Chapter 12
 - **Dead/Live Loads**: User-defined or code-prescribed
+- **Min/Max Reactions**: Tracked for both gravity and uplift conditions
 
 ## PDF Reports
 
@@ -412,10 +414,13 @@ See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
 
 ### Engineering Features
 
-- [ ] Full NDS adjustment factor implementation (C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r, C_P, C_b)
+- [x] Full NDS adjustment factor implementation (C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r) ✅
+- [x] Load combination generator (ASCE 7 ASD/LRFD with ±W uplift) ✅
+- [x] Point load calculations with superposition ✅
+- [x] Equations module with documented formulas (Roark's references) ✅
+- [ ] C_P column stability factor, C_b bearing factor
 - [ ] AISC 360 steel beam/column design
 - [ ] ACI 318 concrete design
-- [ ] Load combination generator (ASCE 7 ASD/LRFD)
 - [ ] Continuous beam analysis (moment distribution or stiffness method)
 - [ ] Frame analysis (matrix stiffness method)
 

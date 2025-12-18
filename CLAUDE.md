@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Stratify is a cross-platform structural engineering calculation suite written in Rust. It provides native desktop applications (Windows, macOS, Linux) and a WebAssembly-based web application for structural analysis, design, and PDF report generation.
 
-**Current Status**: Phase 3 in progress. NDS adjustment factors implemented with GUI. **WASM browser support working** with Iced 0.14 + WebGPU. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
+**Current Status**: Phase 3 in progress. Point loads, wind uplift (±W), and equations module complete. **WASM browser support working** with Iced 0.14 + WebGPU. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
 
 ## Build Commands
 
@@ -17,7 +17,7 @@ cargo run --bin calc_gui
 # Build release
 cargo build --release --bin calc_gui
 
-# Run tests (140 tests: 112 unit + 28 doc)
+# Run tests (185 tests: 149 unit + 36 doc)
 cargo test
 
 # Build CLI (placeholder only)
@@ -37,12 +37,16 @@ stratify/
 ├── calc_core/           # [LIB] Pure Rust calculation engine
 │   ├── calculations/    # Beam, column calculation modules
 │   │   ├── beam.rs      # BeamInput, BeamResult, calculate()
+│   │   ├── beam_analysis.rs # Superposition analysis, SingleLoad, diagrams
 │   │   └── column.rs    # Placeholder
+│   ├── equations/       # Documented statics formulas (for manual review)
+│   │   ├── beam.rs      # Point/uniform/partial load M, V, δ (Roark's refs)
+│   │   └── section.rs   # Rectangular A, I, S, r, nominal-to-actual
 │   ├── loads/           # Load handling
 │   │   ├── mod.rs       # LoadCase, DesignMethod (ASD/LRFD)
 │   │   ├── load_types.rs # LoadType enum (D, L, Lr, S, W, E, H)
 │   │   ├── discrete.rs  # DiscreteLoad, EnhancedLoadCase
-│   │   └── combinations.rs # ASCE 7 load combinations
+│   │   └── combinations.rs # ASCE 7 load combinations (±W for uplift)
 │   ├── materials/       # Material properties
 │   │   ├── mod.rs       # Material enum, unified interface
 │   │   ├── sawn_lumber.rs # WoodSpecies, WoodGrade, NDS Table 4A
@@ -101,19 +105,22 @@ Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map 
 ## Current Implementation
 
 ### What's Working
-- **Beam calculations**: Simply-supported with uniform/point loads, full NDS checks
+- **Beam calculations**: Simply-supported with uniform/point loads, superposition analysis
+- **Point loads**: Full support with correct M, V, δ formulas at any position
+- **Wind uplift**: ±W combinations for uplift design, min/max reactions tracked
 - **NDS adjustment factors**: C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r with GUI controls
-- **Load combinations**: ASCE 7 ASD (16 combos) and LRFD (7 combos), auto-governing
+- **Load combinations**: ASCE 7 ASD (21 combos) and LRFD (23 combos) with ±W uplift
 - **Discrete loads**: Multiple loads per beam (D, L, Lr, S, W, E, H), point and uniform
 - **Wood materials**: Sawn lumber (5 species, 8 grades), Glulam, LVL, PSL
 - **PDF export**: Professional reports with Typst, multi-beam export
 - **GUI**: Live preview, auto-save, diagram rendering, file locking
 - **Diagrams**: Beam schematic with reactions, shear (V), moment (M), deflection (δ)
+- **Equations module**: Documented statics formulas with Roark's references
 
 ### What's Placeholder/Incomplete
 - Column calculations (stub only)
 - Steel and concrete materials
-- Point load/partial uniform calculations in beam solver (UI ready, calc treats as uniform)
+- Partial uniform loads (structure ready, formulas implemented)
 - CLI interface (basic stdin demo only)
 
 ## Tech Stack
