@@ -41,8 +41,8 @@ typst = "0.14"
 typst-pdf = "0.14"
 typst-assets = { version = "0.14", features = ["fonts"] }
 
-# GUI (Iced)
-iced = { version = "0.13", features = ["wgpu", "tokio", "canvas"] }
+# GUI (Iced) - 0.14 has updated wgpu with WebGPU browser support
+iced = { version = "0.14", features = ["wgpu", "tokio", "canvas"] }
 
 # TUI (Ratatui)
 ratatui = "0.29"

@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::{
-    button, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
-    scrollable, text, text_input, vertical_space, Column, Row,
+    button, checkbox, column, container, pick_list, row, rule,
+    scrollable, text, text_input, Column, Row, Space,
 };
 use iced::{
     event, Alignment, Color, Element, Event, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -208,14 +208,15 @@ fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
-    iced::application("Stratify - Structural Engineering", App::update, App::view)
+    iced::application(App::new, App::update, App::view)
+        .title(App::window_title)
         .subscription(App::subscription)
-        .theme(|_| Theme::Light)
+        .theme(App::theme)
         .window_size((1200.0, 750.0))
         .font(BERKELEY_MONO)
         .font(BERKELEY_MONO_BOLD)
         .default_font(Font::with_name("Berkeley Mono"))
-        .run_with(App::new)
+        .run()
 }
 
 // ============================================================================
@@ -343,6 +344,11 @@ impl Default for App {
 impl App {
     fn new() -> (Self, Task<Message>) {
         (Self::default(), Task::none())
+    }
+
+    /// Get the application theme
+    fn theme(&self) -> Theme {
+        Theme::Light
     }
 
     /// Get window title with file name and modified indicator
@@ -1311,16 +1317,16 @@ impl App {
         let main_content = column![
             // Header with file operations
             self.view_header(),
-            horizontal_rule(2),
+            rule::horizontal(2),
             // Toolbar
             self.view_toolbar(),
-            horizontal_rule(1),
-            vertical_space().height(10),
+            rule::horizontal(1),
+            Space::new().height(10),
             // Main content
             content,
             // Status bar
-            vertical_space().height(10),
-            horizontal_rule(1),
+            Space::new().height(10),
+            rule::horizontal(1),
             self.view_status_bar(),
         ]
         .padding(15);
@@ -1335,7 +1341,7 @@ impl App {
         let title = self.window_title();
         row![
             text("Stratify").size(28),
-            horizontal_space(),
+            Space::new().width(Length::Fill),
             text(title).size(14),
         ]
         .align_y(Alignment::Center)
@@ -1367,7 +1373,7 @@ impl App {
         ]
         .spacing(4);
 
-        row![file_buttons, horizontal_space(),]
+        row![file_buttons, Space::new().width(Length::Fill),]
             .padding(Padding::from([4, 0]))
             .into()
     }
@@ -1404,7 +1410,7 @@ impl App {
             panel_content = panel_content.push(project_info_btn);
         }
 
-        panel_content = panel_content.push(horizontal_rule(1));
+        panel_content = panel_content.push(rule::horizontal(1));
 
         // ===== Wood Beams Section =====
         let beams_expanded = !self.collapsed_sections.contains(&ItemSection::WoodBeams);
@@ -1417,7 +1423,7 @@ impl App {
         let beams_header_btn = button(
             row![
                 text(beams_indicator).size(10),
-                horizontal_space().width(4),
+                Space::new().width(4),
                 text(format!("Wood Beams ({})", beam_count)).size(11),
             ]
             .align_y(Alignment::Center),
@@ -1468,13 +1474,13 @@ impl App {
             panel_content = panel_content.push(beams_list);
         }
 
-        panel_content = panel_content.push(horizontal_rule(1));
+        panel_content = panel_content.push(rule::horizontal(1));
 
         // ===== Wood Columns Section (Future) =====
         let columns_header = self.view_section_header_disabled("Wood Columns", 0);
         panel_content = panel_content.push(columns_header);
 
-        panel_content = panel_content.push(horizontal_rule(1));
+        panel_content = panel_content.push(rule::horizontal(1));
 
         // ===== Future Sections (Grayed out) =====
         let future_sections = column![
@@ -1509,7 +1515,7 @@ impl App {
         let header_btn = button(
             row![
                 text(indicator).size(10),
-                horizontal_space().width(4),
+                Space::new().width(4),
                 text(title).size(11),
             ]
             .align_y(Alignment::Center),
@@ -1538,7 +1544,7 @@ impl App {
     fn view_section_header_disabled(&self, title: &str, count: usize) -> Element<'_, Message> {
         row![
             text("▶").size(10).color([0.6, 0.6, 0.6]),
-            horizontal_space().width(4),
+            Space::new().width(4),
             text(format!("{} ({})", title, count)).size(11).color([0.6, 0.6, 0.6]),
         ]
         .padding(Padding::from([4, 6]))
@@ -1553,7 +1559,7 @@ impl App {
                 // Project Info editor
                 column![
                     text("Project Information").size(14),
-                    vertical_space().height(8),
+                    Space::new().height(8),
                     labeled_input(
                         "Engineer:",
                         &self.project.meta.engineer,
@@ -1561,7 +1567,7 @@ impl App {
                     ),
                     labeled_input("Job ID:", &self.project.meta.job_id, Message::JobIdChanged),
                     labeled_input("Client:", &self.project.meta.client, Message::ClientChanged),
-                    vertical_space().height(20),
+                    Space::new().height(20),
                     text("Select a beam from the left panel to edit,").size(11).color([0.5, 0.5, 0.5]),
                     text("or click '+' to create a new beam.").size(11).color([0.5, 0.5, 0.5]),
                 ]
@@ -1594,7 +1600,7 @@ impl App {
 
         let beam_section = column![
             text(editing_label).size(14),
-            vertical_space().height(8),
+            Space::new().height(8),
             labeled_input("Label:", &self.beam_label, Message::BeamLabelChanged),
             labeled_input("Span (ft):", &self.span_ft, Message::SpanChanged),
             labeled_input("Width (in):", &self.width_in, Message::WidthChanged),
@@ -1616,7 +1622,7 @@ impl App {
                 )
                 .width(Length::Fill)
                 .placeholder("Select..."),
-                vertical_space().height(4),
+                Space::new().height(4),
                 text("Grade:").size(11),
                 pick_list(
                     &WoodGrade::ALL[..],
@@ -1636,7 +1642,7 @@ impl App {
                 )
                 .width(Length::Fill)
                 .placeholder("Select..."),
-                vertical_space().height(4),
+                Space::new().height(4),
                 text("Layup:").size(11),
                 pick_list(
                     &GlulamLayup::ALL[..],
@@ -1673,7 +1679,7 @@ impl App {
 
         let material_section = column![
             text("Material").size(14),
-            vertical_space().height(8),
+            Space::new().height(8),
             text("Type:").size(11),
             pick_list(
                 &MaterialType::ALL[..],
@@ -1681,7 +1687,7 @@ impl App {
                 Message::MaterialTypeSelected
             )
             .width(Length::Fill),
-            vertical_space().height(8),
+            Space::new().height(8),
             material_options,
         ]
         .spacing(2);
@@ -1703,13 +1709,13 @@ impl App {
 
         column![
             beam_section,
-            vertical_space().height(10),
+            Space::new().height(10),
             loads_section,
-            vertical_space().height(10),
+            Space::new().height(10),
             material_section,
-            vertical_space().height(10),
+            Space::new().height(10),
             adjustment_factors_section,
-            vertical_space().height(15),
+            Space::new().height(15),
             action_buttons,
         ]
     }
@@ -1798,17 +1804,18 @@ impl App {
         .spacing(4);
 
         // Beam stability (bracing)
-        let bracing = checkbox("Compression edge braced (C_L = 1.0)", self.compression_edge_braced)
+        let bracing = checkbox(self.compression_edge_braced)
+            .label("Compression edge braced (C_L = 1.0)")
             .on_toggle(Message::CompressionBracedToggled)
             .text_size(10);
 
         column![
             text("NDS Adjustment Factors").size(14),
-            vertical_space().height(6),
+            Space::new().height(6),
             core_factors,
-            vertical_space().height(6),
+            Space::new().height(6),
             other_factors,
-            vertical_space().height(6),
+            Space::new().height(6),
             bracing,
         ]
         .spacing(2)
@@ -1816,7 +1823,8 @@ impl App {
     }
 
     fn view_load_table(&self) -> Element<'_, Message> {
-        let self_weight_checkbox = checkbox("Include self-weight", self.include_self_weight)
+        let self_weight_checkbox = checkbox(self.include_self_weight)
+            .label("Include self-weight")
             .on_toggle(Message::IncludeSelfWeightToggled)
             .text_size(11);
 
@@ -1897,13 +1905,13 @@ impl App {
 
         column![
             text("Loads").size(14),
-            vertical_space().height(6),
+            Space::new().height(6),
             self_weight_checkbox,
-            vertical_space().height(6),
+            Space::new().height(6),
             header,
-            horizontal_rule(1),
+            rule::horizontal(1),
             load_rows,
-            vertical_space().height(6),
+            Space::new().height(6),
             add_load_btn,
         ]
         .spacing(2)
@@ -1914,7 +1922,7 @@ impl App {
         let content: Column<'_, Message> = if let Some(ref error) = self.error_message {
             column![
                 text("Error").size(14),
-                vertical_space().height(8),
+                Space::new().height(8),
                 text(error).size(12).color([0.8, 0.2, 0.2]),
             ]
         } else if let (Some(ref input), Some(ref result)) = (&self.calc_input, &self.result) {
@@ -1928,9 +1936,9 @@ impl App {
                 .into();
 
             results_text
-                .push(vertical_space().height(15))
+                .push(Space::new().height(15))
                 .push(text("Diagrams").size(14))
-                .push(vertical_space().height(8))
+                .push(Space::new().height(8))
                 .push(canvas_widget)
         } else {
             self.view_project_summary()
@@ -1949,14 +1957,14 @@ impl App {
 
         column![
             text("Project Summary").size(14),
-            vertical_space().height(8),
+            Space::new().height(8),
             text(format!("Engineer: {}", self.project.meta.engineer)).size(11),
             text(format!("Job ID: {}", self.project.meta.job_id)).size(11),
             text(format!("Client: {}", self.project.meta.client)).size(11),
             text(format!("Items: {}", item_count)).size(11),
-            vertical_space().height(15),
+            Space::new().height(15),
             text("Select an item from the list or create a new beam.").size(11),
-            vertical_space().height(8),
+            Space::new().height(8),
             text("Keyboard shortcuts:").size(11),
             text("  Ctrl+N: New project").size(10),
             text("  Ctrl+O: Open project").size(10),
@@ -1999,14 +2007,14 @@ impl App {
 
         column![
             text("Calculation Results").size(14),
-            vertical_space().height(8),
+            Space::new().height(8),
             pass_fail,
             governing,
-            vertical_space().height(12),
+            Space::new().height(12),
             text("Load Summary").size(12),
             text(format!("Design Load: {:.1} plf{}", result.design_load_plf, self_weight_text)).size(11),
             text(format!("Governing Combo: {}", result.governing_combination)).size(11),
-            vertical_space().height(12),
+            Space::new().height(12),
             text("Demand").size(12),
             text(format!("Max Moment: {:.0} ft-lb", result.max_moment_ftlb)).size(11),
             text(format!("Max Shear: {:.0} lb", result.max_shear_lb)).size(11),
@@ -2015,7 +2023,7 @@ impl App {
                 result.max_deflection_in
             ))
             .size(11),
-            vertical_space().height(12),
+            Space::new().height(12),
             text("Capacity Checks").size(12),
             text(format!(
                 "Bending: {:.0}/{:.0} psi = {:.2} [{}]",
@@ -2035,7 +2043,7 @@ impl App {
                 defl_status
             ))
             .size(11),
-            vertical_space().height(12),
+            Space::new().height(12),
             text("Section Properties").size(12),
             text(format!(
                 "Section Modulus (S): {:.2} in³",
@@ -2066,7 +2074,7 @@ impl App {
         row![
             text(format!("{}{}", file_info, modified_indicator)).size(10),
             text(lock_info).size(10).color([0.6, 0.3, 0.0]),
-            horizontal_space(),
+            Space::new().width(Length::Fill),
             text(&self.status).size(10),
         ]
         .padding(Padding::from([4, 0]))
@@ -2291,7 +2299,7 @@ impl BeamDiagram {
             position: Point::new(x + width / 2.0, y + 8.0),
             color,
             size: iced::Pixels(10.0),
-            horizontal_alignment: iced::alignment::Horizontal::Center,
+            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(load_text);
@@ -2302,7 +2310,7 @@ impl BeamDiagram {
             position: Point::new(x + width / 2.0, beam_y + support_size + 8.0),
             color,
             size: iced::Pixels(10.0),
-            horizontal_alignment: iced::alignment::Horizontal::Center,
+            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(span_text);
@@ -2512,7 +2520,7 @@ impl BeamDiagram {
             position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
             color,
             size: iced::Pixels(9.0),
-            horizontal_alignment: iced::alignment::Horizontal::Center,
+            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(max_label);
@@ -2585,7 +2593,7 @@ impl BeamDiagram {
             position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
             color,
             size: iced::Pixels(9.0),
-            horizontal_alignment: iced::alignment::Horizontal::Center,
+            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(max_label);

@@ -64,5 +64,16 @@
         <div class="spinner"></div>
         <p>Loading WebAssembly...</p>
     </div>
+    <script>
+        // Hide loading spinner when Iced canvas is ready
+        const observer = new MutationObserver((mutations) => {
+            const canvas = document.querySelector('canvas');
+            if (canvas) {
+                document.getElementById('loading').classList.add('hidden');
+                observer.disconnect();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    </script>
 </body>
 </html>
