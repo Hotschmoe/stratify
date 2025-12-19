@@ -31,6 +31,8 @@ use calc_core::project::Project;
 
 mod ui;
 
+use ui::modal::{ModalType, PendingAction};
+
 // ============================================================================
 // UI Types
 // ============================================================================
@@ -323,6 +325,9 @@ pub struct App {
     // Settings
     pub dark_mode: bool,
     pub settings_menu_open: bool,
+
+    // Modal state
+    pub active_modal: Option<ModalType>,
 }
 
 impl Default for App {
@@ -399,6 +404,7 @@ impl Default for App {
             status: "Ready - New Project".to_string(),
             dark_mode: false,
             settings_menu_open: false,
+            active_modal: None,
         }
     }
 }
@@ -528,6 +534,11 @@ pub enum Message {
     // Settings
     ToggleSettingsMenu,
     ToggleDarkMode,
+
+    // Modal interactions
+    ModalSave,
+    ModalDontSave,
+    ModalCancel,
 }
 
 // ============================================================================
@@ -880,6 +891,31 @@ impl App {
                 self.settings_menu_open = false; // Close menu after toggling
                 self.diagram_cache.clear();
             }
+
+            // Modal interactions
+            Message::ModalSave => {
+                if let Some(ModalType::UnsavedChanges { action }) = self.active_modal.take() {
+                    // Save first, then perform the pending action
+                    self.save_project();
+                    // Only proceed if save succeeded (is_modified will be false)
+                    if !self.is_modified {
+                        self.perform_pending_action(action);
+                    } else {
+                        // Save failed or was cancelled, restore modal
+                        self.active_modal = Some(ModalType::UnsavedChanges { action });
+                    }
+                }
+            }
+            Message::ModalDontSave => {
+                if let Some(ModalType::UnsavedChanges { action }) = self.active_modal.take() {
+                    // Discard changes and perform the pending action
+                    self.is_modified = false;
+                    self.perform_pending_action(action);
+                }
+            }
+            Message::ModalCancel => {
+                self.active_modal = None;
+            }
         }
         Task::none()
     }
@@ -890,7 +926,33 @@ impl App {
         }
     }
 
+    /// Check if there are unsaved changes and show modal if needed
+    fn check_unsaved_changes(&mut self, action: PendingAction) -> bool {
+        if self.is_modified {
+            self.settings_menu_open = false; // Close settings menu if open
+            self.active_modal = Some(ModalType::UnsavedChanges { action });
+            true // Has unsaved changes, modal shown
+        } else {
+            false // No unsaved changes, can proceed
+        }
+    }
+
+    /// Perform a pending action after modal confirmation
+    fn perform_pending_action(&mut self, action: PendingAction) {
+        match action {
+            PendingAction::NewProject => self.do_new_project(),
+            PendingAction::OpenProject => self.do_open_project(),
+        }
+    }
+
     fn new_project(&mut self) {
+        if self.check_unsaved_changes(PendingAction::NewProject) {
+            return; // Modal will handle continuation
+        }
+        self.do_new_project();
+    }
+
+    fn do_new_project(&mut self) {
         self.file_lock = None;
         self.project = Project::new("Engineer", "25-001", "Client");
         self.current_file = None;
@@ -904,6 +966,14 @@ impl App {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn open_project(&mut self) {
+        if self.check_unsaved_changes(PendingAction::OpenProject) {
+            return; // Modal will handle continuation
+        }
+        self.do_open_project();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_open_project(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Open Project")
             .add_filter("Stratify Project", &["stf"])
@@ -959,6 +1029,14 @@ impl App {
 
     #[cfg(target_arch = "wasm32")]
     fn open_project(&mut self) {
+        if self.check_unsaved_changes(PendingAction::OpenProject) {
+            return; // Modal will handle continuation
+        }
+        self.do_open_project();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn do_open_project(&mut self) {
         self.status = "File open not available in browser. Use drag-and-drop.".to_string();
     }
 
@@ -1506,6 +1584,13 @@ impl App {
                 .height(Length::Fill);
 
             root_stack = root_stack.push(backdrop).push(overlay);
+        }
+
+        // Modal overlay (highest priority)
+        if let Some(ref modal_type) = self.active_modal {
+            let backdrop = ui::modal::view_backdrop();
+            let modal_content = ui::modal::view_modal(modal_type);
+            root_stack = root_stack.push(backdrop).push(modal_content);
         }
 
         root_stack.into()

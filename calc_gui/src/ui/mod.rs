@@ -21,6 +21,7 @@
 //! - `shared/diagrams` - Canvas drawing for shear/moment/deflection diagrams
 
 // Top-level panels
+pub mod modal;
 pub mod toolbar;
 pub mod items_panel;
 pub mod input_panel;
