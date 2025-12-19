@@ -697,12 +697,39 @@ impl BeamDiagram {
         axis_color: Color,
     ) {
         // Internal margins to keep content within bounds
-        let top_margin = 18.0;    // Space for title/axis
+        let top_margin = 18.0;    // Space for title
         let bottom_margin = 8.0;  // Small bottom margin
         let usable_height = height - top_margin - bottom_margin;
 
-        let axis_y = y + top_margin;
-        let plot_height = usable_height * 0.85;  // Moment goes downward from axis
+        // Find min and max moments to properly scale and position axis
+        let (min_m, max_m) = if !self.data.moment_diagram.is_empty() {
+            self.data.moment_diagram.iter()
+                .map(|(_, m)| *m)
+                .fold((0.0f64, 0.0f64), |(min, max), m| (min.min(m), max.max(m)))
+        } else {
+            (0.0, self.data.max_moment_ftlb)
+        };
+
+        // Calculate axis position based on moment range
+        // Positive moments go down, negative moments go up
+        let total_range = max_m - min_m;
+        let axis_ratio = if total_range.abs() > 1e-6 {
+            // Position axis so that max positive is at bottom, max negative at top
+            (-min_m / total_range) as f32  // Fraction of space above axis
+        } else {
+            0.15  // Default: axis near top if no range
+        };
+
+        // Clamp axis position to leave room for content
+        let axis_ratio = axis_ratio.clamp(0.15, 0.85);
+        let axis_y = y + top_margin + axis_ratio * usable_height;
+
+        // Calculate scale factor to fit all moments within bounds
+        let scale = if total_range.abs() > 1e-6 {
+            usable_height / total_range as f32
+        } else {
+            1.0
+        };
 
         // Axis line
         let axis = Path::line(
@@ -712,16 +739,13 @@ impl BeamDiagram {
         frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
 
         // Draw moment diagram using pre-computed points
-        if !self.data.moment_diagram.is_empty() && self.data.max_moment_ftlb.abs() > 1e-6 {
-            let max_m = self.data.max_moment_ftlb;
-
+        if !self.data.moment_diagram.is_empty() && total_range.abs() > 1e-6 {
             // Draw filled area
             let moment_path = Path::new(|builder| {
                 builder.move_to(Point::new(x, axis_y));
                 for (pos, m) in &self.data.moment_diagram {
                     let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
-                    let m_ratio = m / max_m;
-                    let py = axis_y + (m_ratio as f32) * plot_height;
+                    let py = axis_y + (*m as f32) * scale;
                     builder.line_to(Point::new(px, py));
                 }
                 builder.line_to(Point::new(x + width, axis_y));
@@ -733,14 +757,12 @@ impl BeamDiagram {
             let outline = Path::new(|builder| {
                 let first = &self.data.moment_diagram[0];
                 let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
-                let m_ratio = first.1 / max_m;
-                let py = axis_y + (m_ratio as f32) * plot_height;
+                let py = axis_y + (first.1 as f32) * scale;
                 builder.move_to(Point::new(px, py));
 
                 for (pos, m) in &self.data.moment_diagram {
                     let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
-                    let m_ratio = m / max_m;
-                    let py = axis_y + (m_ratio as f32) * plot_height;
+                    let py = axis_y + (*m as f32) * scale;
                     builder.line_to(Point::new(px, py));
                 }
             });
@@ -757,9 +779,15 @@ impl BeamDiagram {
         };
         frame.fill_text(title);
 
+        // Show both max positive and max negative if applicable
+        let label_text = if min_m < -1.0 {
+            format!("+{:.0} / {:.0} ft-lb", max_m, min_m)
+        } else {
+            format!("Max: {:.0} ft-lb", max_m)
+        };
         let max_label = Text {
-            content: format!("Max: {:.0} ft-lb", self.data.max_moment_ftlb),
-            position: Point::new(x + 75.0, y + 3.0),  // Next to title
+            content: label_text,
+            position: Point::new(x + 75.0, y + 3.0),
             color,
             size: iced::Pixels(9.0),
             ..Text::default()
