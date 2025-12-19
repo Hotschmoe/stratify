@@ -127,6 +127,62 @@ pub enum DividerType {
     InputResults,
 }
 
+/// Input panel tabs for organizing beam inputs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputTab {
+    /// Beam description: label, span, dimensions
+    #[default]
+    Description,
+    /// Member selection: material, NDS factors, section deductions
+    MemberSelection,
+    /// Loads: load table
+    Loads,
+}
+
+impl InputTab {
+    pub const ALL: [InputTab; 3] = [
+        InputTab::Description,
+        InputTab::MemberSelection,
+        InputTab::Loads,
+    ];
+}
+
+impl std::fmt::Display for InputTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputTab::Description => write!(f, "Description"),
+            InputTab::MemberSelection => write!(f, "Member"),
+            InputTab::Loads => write!(f, "Loads"),
+        }
+    }
+}
+
+/// Results panel tabs for organizing output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultsTab {
+    /// Numerical calculation results
+    #[default]
+    Results,
+    /// Visual diagrams (V, M, δ)
+    Diagrams,
+}
+
+impl ResultsTab {
+    pub const ALL: [ResultsTab; 2] = [
+        ResultsTab::Results,
+        ResultsTab::Diagrams,
+    ];
+}
+
+impl std::fmt::Display for ResultsTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResultsTab::Results => write!(f, "Results"),
+            ResultsTab::Diagrams => write!(f, "Diagrams"),
+        }
+    }
+}
+
 /// A row in the span table (for multi-span beams)
 #[derive(Debug, Clone)]
 pub struct SpanTableRow {
@@ -344,6 +400,12 @@ pub struct App {
     pub dragging_divider: Option<DividerType>,
     pub drag_start_x: f32,
     pub drag_start_value: f32, // Width for items panel, ratio for input panel
+
+    // Input panel tabs
+    pub selected_input_tab: InputTab,
+
+    // Results panel tabs
+    pub selected_results_tab: ResultsTab,
 }
 
 impl Default for App {
@@ -426,6 +488,8 @@ impl Default for App {
             dragging_divider: None,
             drag_start_x: 0.0,
             drag_start_value: 0.0,
+            selected_input_tab: InputTab::default(),
+            selected_results_tab: ResultsTab::default(),
         }
     }
 }
@@ -565,6 +629,12 @@ pub enum Message {
     DividerDragStart(DividerType, f32), // divider type, initial x position
     DividerDragMove(f32),               // current x position
     DividerDragEnd,
+
+    // Input panel tabs
+    SelectInputTab(InputTab),
+
+    // Results panel tabs
+    SelectResultsTab(ResultsTab),
 }
 
 // ============================================================================
@@ -995,6 +1065,14 @@ impl App {
             Message::DividerDragEnd => {
                 self.dragging_divider = None;
             }
+
+            Message::SelectInputTab(tab) => {
+                self.selected_input_tab = tab;
+            }
+
+            Message::SelectResultsTab(tab) => {
+                self.selected_results_tab = tab;
+            }
         }
         Task::none()
     }
@@ -1394,7 +1472,8 @@ impl App {
             }
         }
 
-        if load_case.loads.is_empty() { return; }
+        // Allow self-weight only (no discrete loads) as a valid configuration
+        if load_case.loads.is_empty() && !load_case.include_self_weight { return; }
 
         let adjustment_factors = AdjustmentFactors {
             load_duration: self.selected_load_duration,
@@ -1501,7 +1580,12 @@ impl App {
             }
         }
 
-        if load_case.loads.is_empty() { self.result = None; self.calc_input = None; return; }
+        // Allow self-weight only (no discrete loads) as a valid configuration
+        if load_case.loads.is_empty() && !load_case.include_self_weight {
+            self.result = None;
+            self.calc_input = None;
+            return;
+        }
 
         let adjustment_factors = AdjustmentFactors {
             load_duration: self.selected_load_duration,

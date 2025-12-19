@@ -390,44 +390,25 @@ This is a private/internal project. For questions or contributions, contact the 
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for detailed implementation phases and checklists.
+This project uses [beads](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. Run `bd ready` to see available work or `bd list --status=open` for all open issues.
 
-## Future Features / TODO
+See [archive/ROADMAP.md](archive/ROADMAP.md) for historical development phases.
 
-### High Priority (Next Steps)
+### What's Complete
 
-- [x] ~~PDF generation with Typst templates~~ ✅ DONE
-- [x] ~~Basic GUI with Iced framework~~ ✅ DONE (Iced 0.14 + WebGPU)
-- [x] ~~WebAssembly browser support~~ ✅ DONE
-- [ ] Steel section database (common W-shapes)
-- [ ] Concrete material properties
+- Full NDS adjustment factors (C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r)
+- Load combination generator (ASCE 7 ASD/LRFD with ±W uplift)
+- Point load calculations with superposition
+- Multi-span continuous beam architecture (Hardy Cross)
+- PDF generation with Typst templates
+- Iced 0.14 GUI with diagrams
+- WebAssembly browser support (WebGPU)
 
-### Material Database Automation
+### Planned Features
 
-- [ ] **AISC Shapes Database**: Purchase official license, build import tooling
-- [ ] **Simpson Strong-Tie Catalog**:
-  - [ ] Search for official XML/CSV digital catalog from manufacturer
-  - [ ] If unavailable, manually transcribe common connectors
-  - [ ] Build automatic catalog update mechanism
-- [ ] **AWC/NDS Database**: Automate extraction from NDS Supplement tables
-- [ ] **Catalog Build Pipeline**: Create `build.rs` script to compile CSV/JSON databases into static Rust HashMaps at build time
-
-### Engineering Features
-
-- [x] Full NDS adjustment factor implementation (C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r) ✅
-- [x] Load combination generator (ASCE 7 ASD/LRFD with ±W uplift) ✅
-- [x] Point load calculations with superposition ✅
-- [x] Equations module with documented formulas (Roark's references) ✅
-- [ ] C_P column stability factor, C_b bearing factor
-- [ ] AISC 360 steel beam/column design
-- [ ] ACI 318 concrete design
-- [ ] Continuous beam analysis (moment distribution or stiffness method)
-- [ ] Frame analysis (matrix stiffness method)
-
-### Platform Features
-
-- [x] WebAssembly deployment (working with WebGPU in Chrome/Edge)
-- [ ] Cloud sync integration (beyond file locking)
-- [ ] CAD interoperability (IFC import/export)
-- [ ] MCP server for LLM integration
+See beads for detailed tracking:
+- **P1**: Complete Wood Beam Design epic
+- **P2**: Column design, GUI tests, compiler warning fixes
+- **P3**: Steel design (AISC 360), WASM deployment, UI polish
+- **P4**: Concrete design (ACI 318), documentation, installers
 

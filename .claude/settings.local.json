@@ -23,7 +23,25 @@
       "Bash(cargo install:*)",
       "Bash(dir \"C:\\\\Users\\\\hotschmoe\\\\Documents\\\\GitHub\\\\Stratify\\\\calc_gui\\\\src\")",
       "Bash(mkdir:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(bd list:*)",
+      "Bash(bd create:*)",
+      "Bash(bd dep add:*)",
+      "Bash(git mv:*)",
+      "Bash(bd sync:*)",
+      "Bash(git push:*)",
+      "Bash(bd stats:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd show:*)",
+      "Bash(bd blocked)",
+      "Bash(bd update:*)",
+      "Bash(bv --robot-triage:*)",
+      "WebFetch(domain:www.aisc.org)",
+      "WebFetch(domain:www.steeltools.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(dir:*)",
+      "Bash(bd close:*)"
     ]
   }
 }

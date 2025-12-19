@@ -1,38 +1,88 @@
 //! Results view for Wood Beam calculations
 //!
-//! Shows:
-//! - Pass/Fail status
-//! - Governing condition
-//! - Demand values (moment, shear, deflection)
-//! - Capacity checks with unity ratios
-//! - Section properties
-//! - Support reactions (max and min)
-//! - Diagrams (beam schematic, shear, moment, deflection)
+//! Displays results organized into two tabs:
+//! - Results: Pass/Fail, demand values, capacity checks, reactions
+//! - Diagrams: Beam schematic, shear, moment, deflection diagrams
 
-use iced::widget::{column, text, Canvas, Column, Space};
-use iced::{Element, Length};
+use iced::widget::{button, column, rule, text, Canvas, Column, Row, Space};
+use iced::{Element, Length, Padding};
 
 use calc_core::calculations::continuous_beam::{ContinuousBeamInput, ContinuousBeamResult};
 
-use crate::Message;
+use crate::{Message, ResultsTab};
 use super::shared::diagrams::{BeamDiagram, BeamDiagramData};
 
-/// Render the beam calculation results
-pub fn view<'a>(input: &'a ContinuousBeamInput, result: &'a ContinuousBeamResult) -> Column<'a, Message> {
-    let results_text = view_calculation_results(input, result);
+/// Render the beam calculation results with tabbed interface
+pub fn view<'a>(
+    input: &'a ContinuousBeamInput,
+    result: &'a ContinuousBeamResult,
+    selected_tab: ResultsTab,
+) -> Column<'a, Message> {
+    // Tab bar
+    let tab_bar = view_tab_bar(selected_tab);
+
+    // Tab content based on selection
+    let tab_content: Element<'_, Message> = match selected_tab {
+        ResultsTab::Results => view_results_tab(input, result),
+        ResultsTab::Diagrams => view_diagrams_tab(input, result),
+    };
+
+    column![
+        tab_bar,
+        rule::horizontal(1),
+        Space::new().height(8),
+        tab_content,
+    ]
+}
+
+/// Render the tab bar
+fn view_tab_bar(selected: ResultsTab) -> Element<'static, Message> {
+    let mut tabs = Row::new().spacing(4);
+
+    for tab in ResultsTab::ALL {
+        let is_selected = tab == selected;
+        let label = text(tab.to_string()).size(11);
+
+        let btn = if is_selected {
+            // Selected tab style - more prominent
+            button(label)
+                .padding(Padding::from([6, 16]))
+                .style(button::secondary)
+        } else {
+            // Unselected tab style
+            button(label)
+                .on_press(Message::SelectResultsTab(tab))
+                .padding(Padding::from([6, 16]))
+                .style(button::text)
+        };
+
+        tabs = tabs.push(btn);
+    }
+
+    tabs.into()
+}
+
+/// Results tab: numerical calculation results
+fn view_results_tab<'a>(input: &'a ContinuousBeamInput, result: &'a ContinuousBeamResult) -> Element<'a, Message> {
+    view_calculation_results(input, result).into()
+}
+
+/// Diagrams tab: visual diagrams
+fn view_diagrams_tab<'a>(input: &'a ContinuousBeamInput, result: &'a ContinuousBeamResult) -> Element<'a, Message> {
     let diagram_data = BeamDiagramData::from_calc(input, result);
     let diagram = BeamDiagram::new(diagram_data);
 
     let canvas_widget: Element<'_, Message> = Canvas::new(diagram)
         .width(Length::Fill)
-        .height(Length::Fixed(340.0))
+        .height(Length::Fixed(400.0))
         .into();
 
-    results_text
-        .push(Space::new().height(15))
-        .push(text("Diagrams").size(14))
-        .push(Space::new().height(8))
-        .push(canvas_widget)
+    column![
+        text("Beam Diagrams").size(14),
+        Space::new().height(8),
+        canvas_widget,
+    ]
+    .into()
 }
 
 /// Render calculation results text

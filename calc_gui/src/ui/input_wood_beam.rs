@@ -1,12 +1,9 @@
 //! Input view for Wood Beam editor
 //!
-//! Displays:
-//! - Beam properties (label, span, width, depth)
-//! - Multi-span configuration (span table)
-//! - Load table with multiple discrete loads
-//! - Material selection (sawn lumber, glulam, LVL, PSL)
-//! - NDS adjustment factors
-//! - Section deductions (notches, holes)
+//! Displays inputs organized into three tabs:
+//! - Description: Beam properties (label, span, width, depth)
+//! - Member Selection: Material, NDS factors, section deductions
+//! - Loads: Load table with multiple discrete loads
 
 use iced::widget::{
     button, checkbox, column, pick_list, row, rule, text, text_input, Column, Row, Space,
@@ -23,9 +20,9 @@ use calc_core::nds_factors::{
 use calc_core::loads::LoadType;
 use calc_core::section_deductions::NotchLocation;
 
-use crate::{App, DistributionType, MaterialType, Message};
+use crate::{App, DistributionType, InputTab, MaterialType, Message};
 
-/// Render the beam editor
+/// Render the beam editor with tabbed interface
 pub fn view(app: &App) -> Column<'_, Message> {
     let editing_label = if app.selected_beam_id().is_some() {
         "Edit Beam"
@@ -33,6 +30,67 @@ pub fn view(app: &App) -> Column<'_, Message> {
         "New Beam"
     };
 
+    // Tab bar
+    let tab_bar = view_tab_bar(app.selected_input_tab);
+
+    // Tab content based on selection
+    let tab_content: Element<'_, Message> = match app.selected_input_tab {
+        InputTab::Description => view_description_tab(app, editing_label),
+        InputTab::MemberSelection => view_member_tab(app),
+        InputTab::Loads => view_loads_tab(app),
+    };
+
+    // Only show Delete button for existing beams (always visible regardless of tab)
+    let action_buttons = if app.selected_beam_id().is_some() {
+        row![
+            button("Delete Beam")
+                .on_press(Message::DeleteSelectedBeam)
+                .padding(Padding::from([6, 12])),
+        ]
+        .spacing(6)
+    } else {
+        row![].spacing(6)
+    };
+
+    column![
+        tab_bar,
+        rule::horizontal(1),
+        Space::new().height(8),
+        tab_content,
+        Space::new().height(15),
+        action_buttons,
+    ]
+}
+
+/// Render the tab bar
+fn view_tab_bar(selected: InputTab) -> Element<'static, Message> {
+    let mut tabs = Row::new().spacing(4);
+
+    for tab in InputTab::ALL {
+        let is_selected = tab == selected;
+        let label = text(tab.to_string()).size(11);
+
+        let btn = if is_selected {
+            // Selected tab style - more prominent
+            button(label)
+                .padding(Padding::from([6, 16]))
+                .style(button::secondary)
+        } else {
+            // Unselected tab style
+            button(label)
+                .on_press(Message::SelectInputTab(tab))
+                .padding(Padding::from([6, 16]))
+                .style(button::text)
+        };
+
+        tabs = tabs.push(btn);
+    }
+
+    tabs.into()
+}
+
+/// Description tab: beam properties (label, span, dimensions)
+fn view_description_tab<'a>(app: &'a App, editing_label: &'a str) -> Element<'a, Message> {
     // Section dimensions - show size dropdown for sawn lumber
     let section_inputs: Element<'_, Message> = if app.selected_material_type == MaterialType::SawnLumber {
         view_sawn_lumber_section(app)
@@ -58,7 +116,7 @@ pub fn view(app: &App) -> Column<'_, Message> {
         .on_toggle(|_| Message::ToggleMultiSpanMode)
         .text_size(11);
 
-    let beam_section = column![
+    column![
         text(editing_label).size(14),
         Space::new().height(8),
         labeled_input("Label:", &app.beam_label, Message::BeamLabelChanged),
@@ -69,45 +127,29 @@ pub fn view(app: &App) -> Column<'_, Message> {
         Space::new().height(4),
         section_inputs,
     ]
-    .spacing(6);
+    .spacing(6)
+    .into()
+}
 
-    // Load table section
-    let loads_section = view_load_table(app);
-
-    // Material section
+/// Member Selection tab: material, NDS factors, section deductions
+fn view_member_tab(app: &App) -> Element<'_, Message> {
     let material_section = view_material_section(app);
-
-    // NDS Adjustment Factors section
     let adjustment_factors_section = view_adjustment_factors(app);
-
-    // Section deductions (notches and holes)
     let section_deductions_section = view_section_deductions(app);
 
-    // Only show Delete button for existing beams
-    let action_buttons = if app.selected_beam_id().is_some() {
-        row![
-            button("Delete Beam")
-                .on_press(Message::DeleteSelectedBeam)
-                .padding(Padding::from([6, 12])),
-        ]
-        .spacing(6)
-    } else {
-        row![].spacing(6)
-    };
-
     column![
-        beam_section,
-        Space::new().height(10),
-        loads_section,
-        Space::new().height(10),
         material_section,
         Space::new().height(10),
         adjustment_factors_section,
         Space::new().height(10),
         section_deductions_section,
-        Space::new().height(15),
-        action_buttons,
     ]
+    .into()
+}
+
+/// Loads tab: load table
+fn view_loads_tab(app: &App) -> Element<'_, Message> {
+    view_load_table(app)
 }
 
 /// Render sawn lumber section with size dropdown
