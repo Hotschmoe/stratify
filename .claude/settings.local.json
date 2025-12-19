@@ -23,7 +23,14 @@
       "Bash(cargo install:*)",
       "Bash(dir \"C:\\\\Users\\\\hotschmoe\\\\Documents\\\\GitHub\\\\Stratify\\\\calc_gui\\\\src\")",
       "Bash(mkdir:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(bd list:*)",
+      "Bash(bd create:*)",
+      "Bash(bd dep add:*)",
+      "Bash(git mv:*)",
+      "Bash(bd sync:*)",
+      "Bash(git push:*)",
+      "Bash(bd stats:*)"
     ]
   }
 }
