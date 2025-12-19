@@ -377,7 +377,7 @@ impl ContinuousBeamInput {
         Self {
             label: label.into(),
             spans: vec![span],
-            supports: vec![SupportType::Pinned, SupportType::Roller],
+            supports: vec![SupportType::Pinned, SupportType::Pinned],
             load_case,
             adjustment_factors: AdjustmentFactors::default(),
             section_deductions: SectionDeductions::default(),
@@ -588,8 +588,8 @@ impl ContinuousBeamInput {
     /// Add a span to the right end
     pub fn add_span(&mut self, span: SpanSegment) {
         self.spans.push(span);
-        // Add a default support for the new node
-        self.supports.push(SupportType::Roller);
+        // Add a default support for the new node (pinned for standard convention)
+        self.supports.push(SupportType::Pinned);
     }
 
     /// Remove the rightmost span (if more than one exists)
@@ -608,7 +608,7 @@ impl Default for ContinuousBeamInput {
         Self {
             label: String::new(),
             spans: vec![SpanSegment::default()],
-            supports: vec![SupportType::Pinned, SupportType::Roller],
+            supports: vec![SupportType::Pinned, SupportType::Pinned],
             load_case: EnhancedLoadCase::default(),
             adjustment_factors: AdjustmentFactors::default(),
             section_deductions: SectionDeductions::default(),
