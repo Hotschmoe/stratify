@@ -127,6 +127,36 @@ pub enum DividerType {
     InputResults,
 }
 
+/// Input panel tabs for organizing beam inputs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputTab {
+    /// Beam description: label, span, dimensions
+    #[default]
+    Description,
+    /// Member selection: material, NDS factors, section deductions
+    MemberSelection,
+    /// Loads: load table
+    Loads,
+}
+
+impl InputTab {
+    pub const ALL: [InputTab; 3] = [
+        InputTab::Description,
+        InputTab::MemberSelection,
+        InputTab::Loads,
+    ];
+}
+
+impl std::fmt::Display for InputTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InputTab::Description => write!(f, "Description"),
+            InputTab::MemberSelection => write!(f, "Member"),
+            InputTab::Loads => write!(f, "Loads"),
+        }
+    }
+}
+
 /// A row in the span table (for multi-span beams)
 #[derive(Debug, Clone)]
 pub struct SpanTableRow {
@@ -344,6 +374,9 @@ pub struct App {
     pub dragging_divider: Option<DividerType>,
     pub drag_start_x: f32,
     pub drag_start_value: f32, // Width for items panel, ratio for input panel
+
+    // Input panel tabs
+    pub selected_input_tab: InputTab,
 }
 
 impl Default for App {
@@ -426,6 +459,7 @@ impl Default for App {
             dragging_divider: None,
             drag_start_x: 0.0,
             drag_start_value: 0.0,
+            selected_input_tab: InputTab::default(),
         }
     }
 }
@@ -565,6 +599,9 @@ pub enum Message {
     DividerDragStart(DividerType, f32), // divider type, initial x position
     DividerDragMove(f32),               // current x position
     DividerDragEnd,
+
+    // Input panel tabs
+    SelectInputTab(InputTab),
 }
 
 // ============================================================================
@@ -994,6 +1031,10 @@ impl App {
             }
             Message::DividerDragEnd => {
                 self.dragging_divider = None;
+            }
+
+            Message::SelectInputTab(tab) => {
+                self.selected_input_tab = tab;
             }
         }
         Task::none()

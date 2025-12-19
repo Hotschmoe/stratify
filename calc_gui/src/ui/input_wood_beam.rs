@@ -1,12 +1,9 @@
 //! Input view for Wood Beam editor
 //!
-//! Displays:
-//! - Beam properties (label, span, width, depth)
-//! - Multi-span configuration (span table)
-//! - Load table with multiple discrete loads
-//! - Material selection (sawn lumber, glulam, LVL, PSL)
-//! - NDS adjustment factors
-//! - Section deductions (notches, holes)
+//! Displays inputs organized into three tabs:
+//! - Description: Beam properties (label, span, width, depth)
+//! - Member Selection: Material, NDS factors, section deductions
+//! - Loads: Load table with multiple discrete loads
 
 use iced::widget::{
     button, checkbox, column, pick_list, row, rule, text, text_input, Column, Row, Space,
@@ -23,7 +20,7 @@ use calc_core::nds_factors::{
 use calc_core::loads::LoadType;
 use calc_core::section_deductions::NotchLocation;
 
-use crate::{App, DistributionType, MaterialType, Message};
+use crate::{App, DistributionType, InputTab, MaterialType, Message};
 
 /// Render the beam editor
 pub fn view(app: &App) -> Column<'_, Message> {
