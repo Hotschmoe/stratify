@@ -7,8 +7,22 @@ use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Text};
 use iced::{Color, Point, Rectangle, Renderer, Theme};
 
 use calc_core::calculations::continuous_beam::{ContinuousBeamInput, ContinuousBeamResult, SupportType};
+use calc_core::loads::{LoadDistribution, LoadType};
 
 use crate::Message;
+
+/// Simplified load info for diagram drawing
+#[derive(Debug, Clone)]
+pub struct DiagramLoad {
+    /// Load index (1-based for display)
+    pub index: usize,
+    /// Load type (D, L, S, W, etc.)
+    pub load_type: LoadType,
+    /// Distribution pattern
+    pub distribution: LoadDistribution,
+    /// Magnitude (plf for uniform, lb for point)
+    pub magnitude: f64,
+}
 
 /// Data needed to draw beam diagrams
 pub struct BeamDiagramData {
@@ -26,10 +40,24 @@ pub struct BeamDiagramData {
     pub shear_diagram: Vec<(f64, f64)>,
     pub moment_diagram: Vec<(f64, f64)>,
     pub deflection_diagram: Vec<(f64, f64)>,
+    // Discrete loads for individual load visualization
+    pub discrete_loads: Vec<DiagramLoad>,
 }
 
 impl BeamDiagramData {
     pub fn from_calc(input: &ContinuousBeamInput, result: &ContinuousBeamResult) -> Self {
+        // Convert discrete loads for diagram display
+        let discrete_loads: Vec<DiagramLoad> = input.load_case.loads
+            .iter()
+            .enumerate()
+            .map(|(i, load)| DiagramLoad {
+                index: i + 1,
+                load_type: load.load_type,
+                distribution: load.distribution.clone(),
+                magnitude: load.effective_magnitude(),
+            })
+            .collect();
+
         Self {
             total_length_ft: input.total_length_ft(),
             load_plf: input.load_case.total_uniform_plf(),
@@ -42,6 +70,7 @@ impl BeamDiagramData {
             shear_diagram: result.shear_diagram.clone(),
             moment_diagram: result.moment_diagram.clone(),
             deflection_diagram: result.deflection_diagram.clone(),
+            discrete_loads,
         }
     }
 
@@ -157,39 +186,8 @@ impl BeamDiagram {
             }
         }
 
-        // Draw uniform load arrows
-        let num_arrows = 8.min((total_length * 2.0) as i32).max(4);
-        let arrow_spacing = width / (num_arrows as f32);
-        let arrow_length = height * 0.2;
-
-        for i in 0..=num_arrows {
-            let ax = x + i as f32 * arrow_spacing;
-            let arrow = Path::line(
-                Point::new(ax, beam_y - arrow_length),
-                Point::new(ax, beam_y - 5.0),
-            );
-            frame.stroke(&arrow, Stroke::default().with_color(color).with_width(1.0));
-
-            // Arrow head
-            let head = Path::new(|builder| {
-                builder.move_to(Point::new(ax, beam_y - 5.0));
-                builder.line_to(Point::new(ax - 2.0, beam_y - 9.0));
-                builder.move_to(Point::new(ax, beam_y - 5.0));
-                builder.line_to(Point::new(ax + 2.0, beam_y - 9.0));
-            });
-            frame.stroke(&head, Stroke::default().with_color(color).with_width(1.0));
-        }
-
-        // Load label
-        let load_text = Text {
-            content: format!("w = {:.0} plf", self.data.load_plf),
-            position: Point::new(x + width / 2.0, y + 5.0),
-            color,
-            size: iced::Pixels(9.0),
-            align_x: iced::alignment::Horizontal::Center.into(),
-            ..Text::default()
-        };
-        frame.fill_text(load_text);
+        // Draw individual loads with stacking
+        self.draw_discrete_loads(frame, x, y, width, beam_y, total_length);
 
         // Span labels - one for each span
         for (i, span_len) in self.data.span_lengths_ft.iter().enumerate() {
@@ -276,6 +274,299 @@ impl BeamDiagram {
                 frame.stroke(&dot, Stroke::default().with_color(color).with_width(1.5));
             }
         }
+    }
+
+    /// Get color for a load type
+    fn load_type_color(load_type: LoadType) -> Color {
+        match load_type {
+            LoadType::Dead => Color::from_rgb(0.4, 0.4, 0.4),        // Dark gray
+            LoadType::Live => Color::from_rgb(0.2, 0.5, 0.8),        // Blue
+            LoadType::LiveRoof => Color::from_rgb(0.3, 0.6, 0.9),    // Light blue
+            LoadType::Snow => Color::from_rgb(0.5, 0.7, 0.9),        // Pale blue
+            LoadType::Rain => Color::from_rgb(0.2, 0.6, 0.7),        // Teal
+            LoadType::Wind => Color::from_rgb(0.6, 0.3, 0.7),        // Purple
+            LoadType::Seismic => Color::from_rgb(0.8, 0.3, 0.3),     // Red
+            LoadType::SoilLateral => Color::from_rgb(0.7, 0.5, 0.2), // Orange-brown
+            LoadType::Fluid => Color::from_rgb(0.3, 0.5, 0.7),       // Steel blue
+            LoadType::SelfStraining => Color::from_rgb(0.5, 0.5, 0.3), // Olive
+        }
+    }
+
+    /// Draw individual discrete loads with stacking for overlap prevention
+    fn draw_discrete_loads(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        _y: f32,
+        width: f32,
+        beam_y: f32,
+        total_length: f64,
+    ) {
+        if self.data.discrete_loads.is_empty() {
+            return;
+        }
+
+        // Constants for load drawing
+        let base_arrow_length = 18.0_f32;
+        let arrow_gap = 5.0_f32;  // Gap above beam
+        let load_row_height = 22.0_f32;  // Height per load "row" for stacking
+        let label_offset_y = 3.0_f32;
+
+        // Group loads by their horizontal region to determine stacking
+        // For now, we stack all loads that overlap in position
+        // Each load gets its own "row" (vertical offset) based on its index
+        for (row, load) in self.data.discrete_loads.iter().enumerate() {
+            let row_offset = row as f32 * load_row_height;
+            let arrow_top_y = beam_y - arrow_gap - base_arrow_length - row_offset;
+            let arrow_bottom_y = beam_y - arrow_gap - row_offset;
+            let load_color = Self::load_type_color(load.load_type);
+
+            match &load.distribution {
+                LoadDistribution::UniformFull => {
+                    // Draw uniform load across full span
+                    self.draw_uniform_load_region(
+                        frame,
+                        x,
+                        x + width,
+                        arrow_top_y,
+                        arrow_bottom_y,
+                        load_color,
+                    );
+                    // Label at center
+                    let label = format!("L{} ({})", load.index, load.load_type.code());
+                    let magnitude_label = format!("{:.0} plf", load.magnitude);
+                    self.draw_load_label(
+                        frame,
+                        x + width / 2.0,
+                        arrow_top_y - label_offset_y,
+                        &label,
+                        &magnitude_label,
+                        load_color,
+                    );
+                }
+                LoadDistribution::UniformPartial { start_ft, end_ft } => {
+                    // Draw uniform load over partial span
+                    let start_x = x + (*start_ft as f32 / total_length as f32) * width;
+                    let end_x = x + (*end_ft as f32 / total_length as f32) * width;
+                    self.draw_uniform_load_region(
+                        frame,
+                        start_x,
+                        end_x,
+                        arrow_top_y,
+                        arrow_bottom_y,
+                        load_color,
+                    );
+                    // Label at center of loaded region
+                    let center_x = (start_x + end_x) / 2.0;
+                    let label = format!("L{} ({})", load.index, load.load_type.code());
+                    let magnitude_label = format!("{:.0} plf", load.magnitude);
+                    self.draw_load_label(
+                        frame,
+                        center_x,
+                        arrow_top_y - label_offset_y,
+                        &label,
+                        &magnitude_label,
+                        load_color,
+                    );
+                }
+                LoadDistribution::Point { position_ft } => {
+                    // Draw point load at specific position
+                    let point_x = x + (*position_ft as f32 / total_length as f32) * width;
+                    self.draw_point_load(
+                        frame,
+                        point_x,
+                        arrow_top_y,
+                        arrow_bottom_y,
+                        load_color,
+                    );
+                    // Label above the arrow
+                    let label = format!("L{} ({})", load.index, load.load_type.code());
+                    let magnitude_label = format!("{:.0} lb", load.magnitude);
+                    self.draw_load_label(
+                        frame,
+                        point_x,
+                        arrow_top_y - label_offset_y,
+                        &label,
+                        &magnitude_label,
+                        load_color,
+                    );
+                }
+                LoadDistribution::Trapezoidal { start_ft, end_ft, .. } => {
+                    // Draw trapezoidal load (simplified as uniform for now)
+                    let start_x = x + (*start_ft as f32 / total_length as f32) * width;
+                    let end_x = x + (*end_ft as f32 / total_length as f32) * width;
+                    self.draw_uniform_load_region(
+                        frame,
+                        start_x,
+                        end_x,
+                        arrow_top_y,
+                        arrow_bottom_y,
+                        load_color,
+                    );
+                    let center_x = (start_x + end_x) / 2.0;
+                    let label = format!("L{} ({})", load.index, load.load_type.code());
+                    let magnitude_label = "Trap.".to_string();
+                    self.draw_load_label(
+                        frame,
+                        center_x,
+                        arrow_top_y - label_offset_y,
+                        &label,
+                        &magnitude_label,
+                        load_color,
+                    );
+                }
+                LoadDistribution::Moment { position_ft } => {
+                    // Draw moment as a curved arrow
+                    let moment_x = x + (*position_ft as f32 / total_length as f32) * width;
+                    self.draw_moment_load(
+                        frame,
+                        moment_x,
+                        arrow_top_y,
+                        arrow_bottom_y,
+                        load_color,
+                    );
+                    let label = format!("L{} ({})", load.index, load.load_type.code());
+                    let magnitude_label = format!("{:.0} ft-lb", load.magnitude);
+                    self.draw_load_label(
+                        frame,
+                        moment_x,
+                        arrow_top_y - label_offset_y,
+                        &label,
+                        &magnitude_label,
+                        load_color,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Draw a uniform load region with multiple arrows
+    fn draw_uniform_load_region(
+        &self,
+        frame: &mut Frame,
+        start_x: f32,
+        end_x: f32,
+        top_y: f32,
+        bottom_y: f32,
+        color: Color,
+    ) {
+        let region_width = end_x - start_x;
+        let num_arrows = (region_width / 15.0).max(3.0).min(12.0) as i32;
+        let arrow_spacing = region_width / (num_arrows as f32);
+
+        // Draw top connecting line
+        let top_line = Path::line(
+            Point::new(start_x, top_y),
+            Point::new(end_x, top_y),
+        );
+        frame.stroke(&top_line, Stroke::default().with_color(color).with_width(1.5));
+
+        // Draw arrows
+        for i in 0..=num_arrows {
+            let ax = start_x + i as f32 * arrow_spacing;
+            let arrow = Path::line(
+                Point::new(ax, top_y),
+                Point::new(ax, bottom_y),
+            );
+            frame.stroke(&arrow, Stroke::default().with_color(color).with_width(1.0));
+
+            // Arrow head
+            let head = Path::new(|builder| {
+                builder.move_to(Point::new(ax, bottom_y));
+                builder.line_to(Point::new(ax - 2.5, bottom_y - 5.0));
+                builder.move_to(Point::new(ax, bottom_y));
+                builder.line_to(Point::new(ax + 2.5, bottom_y - 5.0));
+            });
+            frame.stroke(&head, Stroke::default().with_color(color).with_width(1.0));
+        }
+    }
+
+    /// Draw a point load arrow
+    fn draw_point_load(
+        &self,
+        frame: &mut Frame,
+        x_pos: f32,
+        top_y: f32,
+        bottom_y: f32,
+        color: Color,
+    ) {
+        // Main arrow line (thicker for point load)
+        let arrow = Path::line(
+            Point::new(x_pos, top_y),
+            Point::new(x_pos, bottom_y),
+        );
+        frame.stroke(&arrow, Stroke::default().with_color(color).with_width(2.5));
+
+        // Arrow head (larger)
+        let head = Path::new(|builder| {
+            builder.move_to(Point::new(x_pos, bottom_y));
+            builder.line_to(Point::new(x_pos - 4.0, bottom_y - 8.0));
+            builder.line_to(Point::new(x_pos + 4.0, bottom_y - 8.0));
+            builder.close();
+        });
+        frame.fill(&head, color);
+    }
+
+    /// Draw a moment load (curved arrow)
+    fn draw_moment_load(
+        &self,
+        frame: &mut Frame,
+        x_pos: f32,
+        top_y: f32,
+        bottom_y: f32,
+        color: Color,
+    ) {
+        let center_y = (top_y + bottom_y) / 2.0;
+        let radius = (bottom_y - top_y) / 2.0;
+
+        // Draw a curved arrow (semi-circle with arrow head)
+        let arc = Path::new(|builder| {
+            // Approximate arc with line segments
+            let segments = 12;
+            for i in 0..=segments {
+                let angle = std::f32::consts::PI * (i as f32 / segments as f32);
+                let px = x_pos + radius * angle.cos();
+                let py = center_y - radius * angle.sin();
+                if i == 0 {
+                    builder.move_to(Point::new(px, py));
+                } else {
+                    builder.line_to(Point::new(px, py));
+                }
+            }
+        });
+        frame.stroke(&arc, Stroke::default().with_color(color).with_width(2.0));
+
+        // Arrow head at end of arc
+        let head = Path::new(|builder| {
+            builder.move_to(Point::new(x_pos - radius, center_y));
+            builder.line_to(Point::new(x_pos - radius + 4.0, center_y - 4.0));
+            builder.move_to(Point::new(x_pos - radius, center_y));
+            builder.line_to(Point::new(x_pos - radius - 4.0, center_y - 4.0));
+        });
+        frame.stroke(&head, Stroke::default().with_color(color).with_width(2.0));
+    }
+
+    /// Draw load label (index and magnitude)
+    fn draw_load_label(
+        &self,
+        frame: &mut Frame,
+        x_pos: f32,
+        y_pos: f32,
+        label: &str,
+        magnitude: &str,
+        color: Color,
+    ) {
+        // Combined label: "L1 (D): 50 plf"
+        let combined = format!("{}: {}", label, magnitude);
+        let text = Text {
+            content: combined,
+            position: Point::new(x_pos, y_pos - 8.0),
+            color,
+            size: iced::Pixels(8.0),
+            align_x: iced::alignment::Horizontal::Center.into(),
+            ..Text::default()
+        };
+        frame.fill_text(text);
     }
 
     fn draw_shear_diagram(
