@@ -257,8 +257,11 @@ cargo test
 # Build CLI (placeholder only)
 cargo run --bin calc_cli
 
-# Build and run WebAssembly (working with WebGPU)
+# Build WebAssembly (agents: compile test only)
 rustup target add wasm32-unknown-unknown
+cd calc_gui && trunk build
+
+# Run WebAssembly (human users only)
 cd calc_gui && trunk serve --open
 ```
 
@@ -364,6 +367,122 @@ fn process(data: &BeamInput) -> BeamResult { ... }
 // Use Cow<str> for flexible string ownership
 use std::borrow::Cow;
 fn process_name(name: Cow<'_, str>) { ... }
+```
+
+### Lifetimes & References
+
+```rust
+// Prefer explicit lifetimes over 'static when API allows
+fn filter<'a>(items: &'a [Item], pred: impl Fn(&Item) -> bool) -> Vec<&'a Item>
+
+// Lifetime elision works for simple cases; be explicit when relationships matter
+fn get_name(&self) -> &str { &self.name }  // Elided: output lifetime tied to &self
+```
+
+### Builder & Type-State Patterns
+
+```rust
+// Builder pattern for complex construction
+let beam = BeamBuilder::new()
+    .length(10.0)
+    .load(LoadType::Distributed(5.0))
+    .build()?;
+
+// Type-state pattern for compile-time state machine enforcement
+struct Connection<S: State> { ... }
+impl Connection<Disconnected> {
+    fn connect(self) -> Result<Connection<Connected>, Error> { ... }
+}
+// Can't call .send() on Disconnected - won't compile!
+```
+
+### `#[must_use]` Attribute
+
+```rust
+// Use for Results that shouldn't be ignored
+#[must_use = "this Result may contain an error that should be handled"]
+pub fn calculate(&self) -> Result<f64, CalcError> { ... }
+
+// Use for iterators (they're lazy!)
+#[must_use = "iterators are lazy; consume with .collect() or for loop"]
+pub fn filter_items(&self) -> impl Iterator<Item = &Item> { ... }
+```
+
+### Smart Pointers
+
+| Type | Use Case |
+|------|----------|
+| `Box<T>` | Heap allocation, recursive types, trait objects (`Box<dyn Trait>`) |
+| `Rc<T>` | Shared ownership, single-threaded only |
+| `Arc<T>` | Shared ownership, thread-safe (use with `Mutex` or `RwLock`) |
+| `RefCell<T>` | Interior mutability, runtime borrow checking |
+| `Cow<T>` | Clone-on-write, avoid allocation when borrowing suffices |
+
+```rust
+// Prefer Rc/Arc only when shared ownership is genuinely needed
+// Default to owned types or references first
+```
+
+### Trait Bounds & Generics
+
+```rust
+// Use where clauses for complex bounds (improves readability)
+fn process<T, U>(data: T) -> U
+where
+    T: AsRef<str> + Clone,
+    U: Default + From<String>,
+{ ... }
+
+// Prefer impl Trait for simple cases
+fn load_items(path: impl AsRef<Path>) -> Result<Vec<Item>, Error> { ... }
+
+// Use associated types when there's one logical type per impl
+trait Parser {
+    type Output;
+    fn parse(&self, input: &str) -> Self::Output;
+}
+```
+
+### Derive Macros
+
+```rust
+// Standard derives for domain types
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeamInput { ... }
+
+// Serde for serializable types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectFile { ... }
+
+// Hash + Eq for map keys
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct ItemId(String);
+
+// Default for types with sensible defaults
+#[derive(Debug, Clone, Default)]
+pub struct Config { ... }
+```
+
+### Clippy Configuration
+
+```rust
+// Project-wide in lib.rs or main.rs
+#![warn(clippy::unwrap_used)]        // Prefer ? or expect() with context
+#![warn(clippy::expect_used)]        // Consider proper error handling
+#![warn(clippy::panic)]              // Avoid panics in production paths
+#![allow(clippy::too_many_arguments)] // If justified by domain
+
+// Per-item overrides when necessary
+#[allow(clippy::type_complexity)]    // Complex types sometimes unavoidable
+fn complex_return() -> HashMap<String, Vec<(usize, Option<Box<dyn Trait>>)>> { ... }
+```
+
+```bash
+# Run clippy with all lints
+cargo clippy -- -W clippy::pedantic
+
+# Fix auto-fixable lints
+cargo clippy --fix
 ```
 
 ---
