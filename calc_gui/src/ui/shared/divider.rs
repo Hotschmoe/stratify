@@ -2,8 +2,8 @@
 //!
 //! A draggable vertical divider that allows users to resize adjacent panels.
 
-use iced::widget::{button, container, rule};
-use iced::{Element, Length};
+use iced::widget::{container, mouse_area, rule};
+use iced::{mouse, Element, Length};
 
 use crate::{DividerType, Message};
 
@@ -26,30 +26,26 @@ pub fn view_divider(divider_type: DividerType, is_dragging: bool) -> Element<'st
         })
         .height(Length::Fill);
 
-    // Use a button for the interactive area - simpler than mouse_area
-    // The button sends a message with x=0, which will be adjusted by the subscription
-    // that tracks actual cursor position during drag
-    let interactive = button(divider_content)
-        .on_press(Message::DividerDragStart(divider_type, 0.0))
-        .padding(0)
-        .style(move |theme: &iced::Theme, status| {
+    // Style the container based on dragging state
+    let styled_content = container(divider_content)
+        .style(move |theme: &iced::Theme| {
             let palette = theme.extended_palette();
-            let is_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-
-            button::Style {
+            container::Style {
                 background: if is_dragging {
                     Some(palette.primary.weak.color.into())
-                } else if is_hovered {
-                    Some(iced::Color::from_rgba(0.5, 0.5, 0.5, 0.1).into())
                 } else {
                     None
                 },
-                border: iced::Border::default(),
-                text_color: palette.background.base.text,
-                shadow: iced::Shadow::default(),
-                snap: false,
+                ..Default::default()
             }
         });
+
+    // Use mouse_area to capture press events immediately (not on click completion)
+    // This is crucial for drag behavior - we need to know when the button goes DOWN
+    let interactive = mouse_area(styled_content)
+        .on_press(Message::DividerDragStart(divider_type, 0.0))
+        .on_release(Message::DividerDragEnd)
+        .interaction(mouse::Interaction::ResizingHorizontally);
 
     interactive.into()
 }
