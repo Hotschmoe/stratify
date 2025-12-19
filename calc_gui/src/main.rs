@@ -10,7 +10,7 @@ use iced::keyboard::{self, Key, Modifiers};
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, rule,
-    scrollable, text, text_input, Column, Row, Space,
+    scrollable, stack, text, text_input, Column, Row, Space,
 };
 use iced::{
     event, Alignment, Color, Element, Event, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -231,6 +231,7 @@ struct App {
     current_file: Option<PathBuf>,
     file_lock: Option<FileLock>, // Hold the lock while file is open!
     is_modified: bool,
+    show_unsaved_changes_modal: bool,
     lock_holder: Option<String>, // Who holds the lock if we opened read-only
 
     // Left panel state - collapsed sections
@@ -308,6 +309,7 @@ impl Default for App {
             current_file: None,
             file_lock: None,
             is_modified: false,
+            show_unsaved_changes_modal: false,
             lock_holder: None,
             collapsed_sections: HashSet::new(), // All sections expanded by default
             selection: EditorSelection::ProjectInfo, // Start with project info selected
@@ -384,6 +386,9 @@ impl App {
 enum Message {
     // File operations
     NewProject,
+    ConfirmNewProject,
+    CancelNewProject,
+    SaveAndNewProject,
     OpenProject,
     SaveProject,
     SaveProjectAs,
@@ -484,7 +489,11 @@ impl App {
                             self.open_project();
                         }
                         Key::Character("n") => {
-                            self.new_project();
+                            if self.is_modified {
+                                self.show_unsaved_changes_modal = true;
+                            } else {
+                                self.do_new_project();
+                            }
                         }
                         _ => {}
                     }
@@ -493,7 +502,25 @@ impl App {
 
             // File operations
             Message::NewProject => {
-                self.new_project();
+                if self.is_modified {
+                    self.show_unsaved_changes_modal = true;
+                } else {
+                    self.do_new_project();
+                }
+            }
+            Message::ConfirmNewProject => {
+                self.show_unsaved_changes_modal = false;
+                self.do_new_project();
+            }
+            Message::CancelNewProject => {
+                self.show_unsaved_changes_modal = false;
+            }
+            Message::SaveAndNewProject => {
+                self.save_project();
+                if !self.is_modified {
+                    self.show_unsaved_changes_modal = false;
+                    self.do_new_project();
+                }
             }
             Message::OpenProject => {
                 self.open_project();
@@ -712,11 +739,10 @@ impl App {
         }
     }
 
-    fn new_project(&mut self) {
+    fn do_new_project(&mut self) {
         // Release any existing lock
         self.file_lock = None;
 
-        // TODO: Check for unsaved changes and prompt
         self.project = Project::new("Engineer", "25-001", "Client");
         self.current_file = None;
         self.is_modified = false;
@@ -1331,9 +1357,62 @@ impl App {
         ]
         .padding(15);
 
-        container(main_content)
+        let mut root = stack![
+            container(main_content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+        ];
+
+        if self.show_unsaved_changes_modal {
+            root = root.push(self.view_unsaved_changes_modal());
+        }
+
+        root.into()
+    }
+
+    fn view_unsaved_changes_modal(&self) -> Element<'_, Message> {
+        let content = column![
+            text("Unsaved Changes").size(20),
+            text("You have unsaved changes. Do you want to save them before creating a new project?"),
+            row![
+                button("Save")
+                    .on_press(Message::SaveAndNewProject)
+                    .padding(10)
+                    .style(button::primary),
+                button("Don't Save")
+                    .on_press(Message::ConfirmNewProject)
+                    .padding(10)
+                    .style(button::danger),
+                button("Cancel")
+                    .on_press(Message::CancelNewProject)
+                    .padding(10)
+                    .style(button::secondary),
+            ]
+            .spacing(20)
+        ]
+        .spacing(20)
+        .padding(20)
+        .align_x(Alignment::Center);
+
+        let modal = container(content)
+            .width(Length::Fixed(400.0))
+            .style(container::bordered_box)
+            .padding(10);
+
+        container(modal)
             .width(Length::Fill)
             .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_theme| {
+                container::Style {
+                    background: Some(Color {
+                        a: 0.5,
+                        ..Color::BLACK
+                    }.into()),
+                    ..container::Style::default()
+                }
+            })
             .into()
     }
 
