@@ -1394,7 +1394,8 @@ impl App {
             }
         }
 
-        if load_case.loads.is_empty() { return; }
+        // Allow self-weight only (no discrete loads) as a valid configuration
+        if load_case.loads.is_empty() && !load_case.include_self_weight { return; }
 
         let adjustment_factors = AdjustmentFactors {
             load_duration: self.selected_load_duration,
@@ -1501,7 +1502,12 @@ impl App {
             }
         }
 
-        if load_case.loads.is_empty() { self.result = None; self.calc_input = None; return; }
+        // Allow self-weight only (no discrete loads) as a valid configuration
+        if load_case.loads.is_empty() && !load_case.include_self_weight {
+            self.result = None;
+            self.calc_input = None;
+            return;
+        }
 
         let adjustment_factors = AdjustmentFactors {
             load_duration: self.selected_load_duration,
