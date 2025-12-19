@@ -908,7 +908,7 @@ fn build_result_from_distribution(
     input: &ContinuousBeamInput,
     dist_result: &crate::calculations::moment_distribution::DistributionResult,
     combo_name: &str,
-    method: DesignMethod,
+    _method: DesignMethod,
     load_factors: &[(LoadType, f64)],
 ) -> CalcResult<ContinuousBeamResult> {
     use crate::nds_factors::{BeamStability, SizeFactor};
@@ -958,15 +958,14 @@ fn build_result_from_distribution(
         let l = span.length_ft;
         let l_in = l * 12.0;
 
-        // 1. Calculate Simple Span Reactions from ALL loads
+        // 1. Calculate Simple Span Reactions from ALL loads (with factors)
         let mut simple_r1 = 0.0;
         let mut simple_r2 = 0.0;
 
-        // Iterate all loads to find those on this span (apply load factors)
         for load in &input.load_case.loads {
             let factor = get_factor(load.load_type);
             if factor.abs() < 1e-10 {
-                continue; // Skip loads with zero factor
+                continue;
             }
             let magnitude = load.effective_magnitude() * factor;
             match &load.distribution {
@@ -976,7 +975,6 @@ fn build_result_from_distribution(
                     simple_r2 += r2;
                 }
                 LoadDistribution::Point { position_ft } => {
-                    // Check if on this span
                     if *position_ft >= span_start && *position_ft <= span_start + l {
                         let local_a = position_ft - span_start;
                         let (r1, r2) = point_load_reactions(magnitude, local_a, l);
@@ -985,12 +983,10 @@ fn build_result_from_distribution(
                     }
                 }
                 LoadDistribution::UniformPartial { start_ft, end_ft } => {
-                    // Check for overlap
                     let span_end = span_start + l;
                     if *start_ft < span_end && *end_ft > span_start {
                         let local_start = (*start_ft - span_start).max(0.0);
                         let local_end = (*end_ft - span_start).min(l);
-
                         if local_end > local_start {
                             let (r1, r2) = partial_uniform_reactions(magnitude, local_start, local_end, l);
                             simple_r1 += r1;
@@ -998,7 +994,7 @@ fn build_result_from_distribution(
                         }
                     }
                 }
-                _ => {} // Moment loads and others ignored for reactions for now
+                _ => {}
             }
         }
 
@@ -1012,109 +1008,44 @@ fn build_result_from_distribution(
         }
 
         // 2. Adjust reactions for end moments
-        // ΔR = (M_right - M_left) / L
-        // M_left and M_right are internal moments.
-        // If M_right > M_left, it creates a clockwise net moment, requiring counter-clockwise reaction couple.
-        // R_left decreases, R_right increases.
         let delta_r = (m_right - m_left) / l;
         let r_left = simple_r1 - delta_r;
         let r_right = simple_r2 + delta_r;
 
-        // Add to node reactions
         reactions[i] += r_left;
         reactions[i + 1] += r_right;
 
-        // 3. Generate Diagram Points
+        // 3. Generate diagram points
         let v_left = r_left;
         let v_right = -r_right;
-        
         let mut span_max_shear = 0.0f64;
         let mut span_max_pos_moment = 0.0f64;
         let mut span_max_pos_moment_x = 0.0;
         let mut max_defl = 0.0f64;
 
-        let ei = span.ei();
-        let i_val = span.moment_of_inertia_in4();
-        let s = span.section_modulus_in3();
         let e = span.e_psi();
+        let i_val = span.moment_of_inertia_in4();
+        let _s = span.section_modulus_in3();
+        let _area = span.area_in2();
+        let ei = span.ei();
 
-        let num_points = 51; // Increase resolution for point loads
+        let num_points = 51;
         for p in 0..num_points {
             let x = l * p as f64 / (num_points - 1) as f64;
-            
-            // Start with effects from reactions/end moments
-            let mut v = r_left;
-            let mut m = m_left + r_left * x; // M(x) starts at m_left and increases with shear
-            
-            // Add deflection from end moments (Roark Case 2e superposition? No, simpler to use conjugate beam or superposition)
-            // Using formula: y = -M_A*x*(L-x)*(2L-x)/(6EIL) + M_B*x*(L-x)*(L+x)/(6EIL)
-            // Signs: M_A (m_left) is moment AT x=0. M_B (m_right) is moment AT x=L.
-            // My sign convention for M is "sagging positive".
-            // Standard formulas often assume M positive creates compression on top.
-            // Let's check m_left/m_right signs from moment distribution.
-            // If they are hogging, they are negative.
-            // Hogging at left (negative M) should cause downward deflection? No, hogging curves up (frown).
-            // Load causes downward deflection (smile).
-            // Let's assume standard Roark: M is bending moment.
-            // Be careful with signs.
-            
-            let mut defl = 0.0;
-            
-            // Superimpose End Moment Deflections (Small angle approx)
-            // Term 1: Left moment effect
-            // y = M_L * x * (L - x) * (2*L - x) / (6*E*I*L)
-            // If M_L is negative (hogging), this gives negative (upward) deflection? 
-            // Wait, positive y is downward?
-            // If M_L is negative (hogging), beam slopes down then up?
-            // Let's stick to positive M = sagging (tension bottom). 
-            // Positive M at support is impossible for gravity load? Yes, typically negative.
-            // If M is negative, it should reduce the downward deflection.
-            // The formula `M*...` typically assumes M is the moment value.
-            // If M is negative, deflection is negative (upward). Correct.
-            defl += m_left * x * (l - x) * (2.0 * l - x) / (6.0 * ei * l / 144.0); // EI in lb-in^2, L needs to be in? 
-            // Wait, units. EI is lb-in^2. M is ft-lb. L is ft.
-            // Convert everything to consistent units (inches and lbs) for deflection
-            // M_inlb = M_ftlb * 12 used inside formula implicitly if we adjust
-            // formula: y = (M_inlb * x_in * ...)
-            
             let x_in = x * 12.0;
             let m_left_in = m_left * 12.0;
             let m_right_in = m_right * 12.0;
-            
-            // Deflection due to "Left Couple" (moment M_A at A, 0 at B)
-            // y = - M_A * x * (L - x) * (2L - x) / (6EIL)  <-- check sign
-            // If M_A is sagging (+), it creates smile. 
-            // At x extremely small: y'' = -M/EI = negative (curvature down).
-            // Correct.
-            // Using the formula `M*x...` produces positive values for positive M.
-            // But strict beam eq is y'' = -M/EI.
-            // If M is positive, y'' is negative (concave down?). Wait.
-            // Smile is Concave UP. y'' > 0.
-            // So y'' = M/EI requires M positive = sagging?
-            // Yes. M(x) positive = sagging.
-            // y'' = M/EI.
-            // So if M_left is negative (hogging), it should curve down (concave down)? No, concave down is Frown.
-            // Hogging = Frown = Concave Down = y'' < 0.
-            // So if M_left is negative, y'' is negative. Math checks out.
-            
-            // Roark Case 3e (Left end moment M_o):
-            // y = -M_o * x / (6EIL) * (2L^2 - 3Lx + x^2)? No.
-            
-            // Let's use the formula: y = [ M_A * x * (L - x) * (2L - x) + M_B * x * (L - x) * (L + x) ] / (6EIL)
-            // *With proper signs*. 
-            // Actually, `m_left + r_left * x` accounts for the linear moment diagram due to supports.
-            // We can just integrate the moment diagram if we had it? No, simpler to superimpose.
-            
-            // Contribution of end moments to deflection (using L in inches)
-            // Term 1 (Left Moment): M_A * x * (L - x) * (2L - x) / (6EIL)  ??
-            // Let's try to trust the standard formula for simply supported beam with end moments.
-            // y(x) = x(L-x) * [ M_A(2L-x) + M_B(L+x) ] / (6EIL)
-            // Note: This assumes M_A and M_B are positive sagging.
-            // So we just plug in our signed moments.
+
+            // Start with reaction contributions
+            let mut v = r_left;
+            let mut m = m_left + r_left * x;
+            let mut defl = 0.0;
+
+            // Add end moment deflection contribution
             let term_moments = x_in * (l_in - x_in) * (m_left_in * (2.0 * l_in - x_in) + m_right_in * (l_in + x_in)) / (6.0 * ei * l_in);
             defl += term_moments;
 
-            // Iterate loads for Shear, Moment, Deflection superposition (with factors)
+            // Superimpose all loads
             for load in &input.load_case.loads {
                 let factor = get_factor(load.load_type);
                 if factor.abs() < 1e-10 {
@@ -1123,58 +1054,45 @@ fn build_result_from_distribution(
                 let magnitude = load.effective_magnitude() * factor;
                 match &load.distribution {
                     LoadDistribution::UniformFull => {
-                        v -= magnitude * x; // V drops linearly
-                        m -= magnitude * x * x / 2.0; // M drops quadratically
-                        defl += uniform_load_deflection(magnitude / 12.0, l_in, x_in, e, i_val); // w in lb/in
+                        v -= magnitude * x;
+                        m -= magnitude * x * x / 2.0;
+                        defl += uniform_load_deflection(magnitude / 12.0, l_in, x_in, e, i_val);
                     }
                     LoadDistribution::Point { position_ft } => {
                         if *position_ft >= span_start && *position_ft <= span_start + l {
-                             let local_a = *position_ft - span_start;
-                             // Shear
-                             if x > local_a {
-                                 v -= magnitude;
-                             }
-                             // Moment
-                             if x > local_a {
-                                 m -= magnitude * (x - local_a);
-                             }
-                             // Deflection
-                             defl += point_load_deflection(magnitude, local_a * 12.0, l_in, x_in, e, i_val);
+                            let local_a = *position_ft - span_start;
+                            if x > local_a {
+                                v -= magnitude;
+                                m -= magnitude * (x - local_a);
+                            }
+                            defl += point_load_deflection(magnitude, local_a * 12.0, l_in, x_in, e, i_val);
                         }
                     }
                     LoadDistribution::UniformPartial { start_ft, end_ft } => {
-                         let span_end = span_start + l;
-                         if *start_ft < span_end && *end_ft > span_start {
-                             let local_start = (*start_ft - span_start).max(0.0);
-                             let local_end = (*end_ft - span_start).min(l);
-
-                             if local_end > local_start {
-                                 // Shear subtracts load integrated up to x
-                                 // Load starts at local_start
-                                 if x > local_start {
-                                     let active_end = x.min(local_end);
-                                     let active_len = active_end - local_start;
-                                     v -= magnitude * active_len;
-
-                                     // Moment subtracts load * moment arm
-                                     let load_force = magnitude * active_len;
-                                     let centroid = local_start + active_len / 2.0;
-                                     m -= load_force * (x - centroid);
-                                 }
-                             }
-                         }
+                        let span_end = span_start + l;
+                        if *start_ft < span_end && *end_ft > span_start {
+                            let local_start = (*start_ft - span_start).max(0.0);
+                            let local_end = (*end_ft - span_start).min(l);
+                            if local_end > local_start && x > local_start {
+                                let active_end = x.min(local_end);
+                                let active_len = active_end - local_start;
+                                v -= magnitude * active_len;
+                                let load_force = magnitude * active_len;
+                                let centroid = local_start + active_len / 2.0;
+                                m -= load_force * (x - centroid);
+                            }
+                        }
                     }
                     _ => {}
                 }
             }
 
-            // Add self-weight contribution (with dead load factor)
+            // Add self-weight contribution
             if input.load_case.include_self_weight {
                 let dead_factor = get_factor(LoadType::Dead);
                 let sw = span.self_weight_plf() * dead_factor;
                 v -= sw * x;
                 m -= sw * x * x / 2.0;
-                // Self weight deflection
                 defl += uniform_load_deflection(sw / 12.0, l_in, x_in, e, i_val);
             }
 
@@ -1188,17 +1106,15 @@ fn build_result_from_distribution(
                 span_max_pos_moment_x = x;
             }
             if defl > max_defl {
-                 max_defl = defl;
+                max_defl = defl;
             }
         }
 
-        // Track global max positive moment
+        // Track global extrema
         if span_max_pos_moment > max_positive_moment {
             max_positive_moment = span_max_pos_moment;
             max_positive_moment_loc = (i, span_max_pos_moment_x);
         }
-
-        // Track negative moments at supports
         if m_left.abs() > max_negative_moment {
             max_negative_moment = m_left.abs();
             max_negative_node = i;
@@ -1207,17 +1123,13 @@ fn build_result_from_distribution(
             max_negative_moment = m_right.abs();
             max_negative_node = i + 1;
         }
-
         if max_defl > max_deflection {
             max_deflection = max_defl;
-            max_deflection_loc = (i, l / 2.0); // Approx location
+            max_deflection_loc = (i, l / 2.0);
         }
-        
-        // Track max shear
         if span_max_shear > max_shear {
             max_shear = span_max_shear;
-            // approximate loc
-            max_shear_loc = (i, 0.0); 
+            max_shear_loc = (i, 0.0);
         }
 
         // Calculate stresses and unity checks
@@ -1226,7 +1138,6 @@ fn build_result_from_distribution(
         let props = span.material.base_properties();
         let factors = &input.adjustment_factors;
 
-        // Design moment (max of positive and negative at this span)
         let design_moment = span_max_pos_moment.max(m_left.abs()).max(m_right.abs());
         let max_moment_inlb = design_moment * 12.0;
         let actual_fb = max_moment_inlb / s;
@@ -1300,7 +1211,7 @@ fn build_result_from_distribution(
             max_negative_moment_ftlb: m_left.abs().max(m_right.abs()),
             max_shear_lb: span_max_shear,
             max_deflection_in: max_defl,
-            max_deflection_pos_ft: l / 2.0, // approx
+            max_deflection_pos_ft: l / 2.0,
             actual_fb_psi: actual_fb,
             allowable_fb_psi: allowable_fb,
             bending_unity,
