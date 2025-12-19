@@ -241,6 +241,12 @@ const BERKELEY_MONO: &[u8] =
 const BERKELEY_MONO_BOLD: &[u8] =
     include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold.otf");
 
+// Layout constants
+const APP_PADDING: f32 = 15.0;
+const SPLITTER_SPACING: f32 = 10.0;
+const SPLITTER_WIDTH: f32 = 10.0;
+const SPLITTER_OFFSET_CENTER: f32 = SPLITTER_WIDTH / 2.0;
+
 fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
@@ -567,19 +573,24 @@ impl App {
                 }
                 Some(Message::KeyPressed(key, modifiers))
             }
-            Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                Some(Message::MouseMoved(position))
-            }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                None // Handled by widgets
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                Some(Message::SplitterReleased)
-            }
             _ => None,
         });
 
-        event_subscription
+        let mouse_subscription = if self.resizing_panel.is_some() {
+            event::listen_with(|event, _status, _id| match event {
+                Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::MouseMoved(position))
+                }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::SplitterReleased)
+                }
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch(vec![event_subscription, mouse_subscription])
     }
 }
 
@@ -923,25 +934,39 @@ impl App {
                     match panel {
                         ResizingPanel::Left => {
                             // Adjust items panel width
-                            // We need to account for padding/margins if necessary, but roughly:
-                            // The items panel is at the left. So position.x is roughly the width.
-                            // We might need to subtract the padding (15) and spacing if we want exact.
-                            // But usually dragging feels better if it tracks the mouse.
-                            let new_width = position.x - 15.0; // Subtract left padding
+                            // Splitter center is at: APP_PADDING + width + SPLITTER_SPACING + SPLITTER_OFFSET_CENTER
+                            let offset = APP_PADDING + SPLITTER_SPACING + SPLITTER_OFFSET_CENTER;
+                            let new_width = position.x - offset;
                             if new_width >= 150.0 && new_width <= 400.0 {
                                 self.items_panel_width = new_width;
                             }
                         }
                         ResizingPanel::Right => {
                             // Adjust input panel width.
-                            // The right splitter is at items_width + input_width + padding + spacing.
-                            // So input_width = mouse_x - items_width - padding - spacing.
-                            // items_panel (15 padding + width) + splitter (say 10 spacing) + input + splitter
-                            // Let's approximate:
-                            // mouse_x is the position of the second splitter.
-                            // input_width = mouse_x - (15 + items_panel_width + 10)
-                            let start_of_input = 15.0 + self.items_panel_width + 10.0;
-                            let new_width = position.x - start_of_input;
+                            // Left splitter center: width_items + 30
+                            // Start of input: width_items + 30 + 5 (half split) + 10 (space) = width_items + 45
+                            // Right splitter center: width_items + 45 + width_input + 10 (space) + 5 (half split)
+                            //                      = width_items + width_input + 60
+
+                            // Total offset from start = offset_1 + items_width + offset_2
+                            // Wait, logic check:
+                            // Items End = APP_PADDING + items_width
+                            // Splitter 1 Start = Items End + SPLITTER_SPACING
+                            // Splitter 1 End = Splitter 1 Start + SPLITTER_WIDTH
+                            // Input Start = Splitter 1 End + SPLITTER_SPACING
+                            // Input End = Input Start + input_width
+                            // Splitter 2 Start = Input End + SPLITTER_SPACING
+                            // Splitter 2 Center = Splitter 2 Start + SPLITTER_OFFSET_CENTER
+
+                            // Let's sum it up:
+                            // Center = APP_PADDING + items_width + SPLITTER_SPACING + SPLITTER_WIDTH + SPLITTER_SPACING + input_width + SPLITTER_SPACING + SPLITTER_OFFSET_CENTER
+                            // Center = 15 + items + 10 + 10 + 10 + input + 10 + 5
+                            // Center = items + input + 60
+
+                            let fixed_offset = APP_PADDING + (SPLITTER_SPACING * 3.0) + SPLITTER_WIDTH + SPLITTER_OFFSET_CENTER;
+                            // 15 + 30 + 10 + 5 = 60. Correct.
+
+                            let new_width = position.x - (self.items_panel_width + fixed_offset);
 
                             // 300.0 min width for input panel
                             if new_width >= 300.0 {
@@ -1524,9 +1549,13 @@ impl App {
                 self.selected_beam_id(),
                 self.items_panel_width,
             ),
+            Space::new().width(SPLITTER_SPACING),
             view_splitter(ResizingPanel::Left, self.resizing_panel == Some(ResizingPanel::Left)),
+            Space::new().width(SPLITTER_SPACING),
             ui::input_panel::view_input_panel(self, self.input_panel_width),
+            Space::new().width(SPLITTER_SPACING),
             view_splitter(ResizingPanel::Right, self.resizing_panel == Some(ResizingPanel::Right)),
+            Space::new().width(SPLITTER_SPACING),
             ui::results_panel::view_results_panel(self),
         ]
         .spacing(0); // Spacing handled by splitters
@@ -1547,7 +1576,7 @@ impl App {
                 &self.status,
             ),
         ]
-        .padding(15);
+        .padding(APP_PADDING);
 
         container(main_content)
             .width(Length::Fill)
@@ -1575,7 +1604,7 @@ fn view_splitter(panel: ResizingPanel, is_resizing: bool) -> Element<'static, Me
                     }
                 })
         )
-        .width(Length::Fixed(10.0))
+        .width(Length::Fixed(SPLITTER_WIDTH))
         .height(Length::Fill)
         .center_x(Length::Fill)
     )
