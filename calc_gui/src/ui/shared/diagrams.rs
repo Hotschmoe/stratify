@@ -297,7 +297,7 @@ impl BeamDiagram {
         &self,
         frame: &mut Frame,
         x: f32,
-        _y: f32,
+        y: f32,
         width: f32,
         beam_y: f32,
         total_length: f64,
@@ -306,19 +306,29 @@ impl BeamDiagram {
             return;
         }
 
-        // Constants for load drawing
-        let base_arrow_length = 18.0_f32;
-        let arrow_gap = 5.0_f32;  // Gap above beam
-        let load_row_height = 22.0_f32;  // Height per load "row" for stacking
+        let num_loads = self.data.discrete_loads.len();
+
+        // Calculate available space for loads (from top margin to just above beam)
+        let top_margin = 12.0_f32;  // Space for top label
+        let arrow_gap = 5.0_f32;    // Gap between arrows and beam
+        let available_height = beam_y - y - top_margin - arrow_gap;
+
+        // Dynamic sizing based on number of loads
+        // Each load needs space for: arrow + label
+        let min_row_height = 16.0_f32;  // Minimum to keep readable
+        let max_row_height = 24.0_f32;  // Maximum comfortable spacing
+        let load_row_height = (available_height / num_loads as f32)
+            .clamp(min_row_height, max_row_height);
+
+        // Arrow length scales with row height (but has min/max bounds)
+        let base_arrow_length = (load_row_height * 0.6).clamp(10.0, 18.0);
         let label_offset_y = 3.0_f32;
 
-        // Group loads by their horizontal region to determine stacking
-        // For now, we stack all loads that overlap in position
-        // Each load gets its own "row" (vertical offset) based on its index
+        // Stack loads from bottom (closest to beam) to top
         for (row, load) in self.data.discrete_loads.iter().enumerate() {
             let row_offset = row as f32 * load_row_height;
-            let arrow_top_y = beam_y - arrow_gap - base_arrow_length - row_offset;
             let arrow_bottom_y = beam_y - arrow_gap - row_offset;
+            let arrow_top_y = arrow_bottom_y - base_arrow_length;
             let load_color = Self::load_type_color(load.load_type);
 
             match &load.distribution {
