@@ -22,6 +22,7 @@ pub fn view_items_panel<'a>(
     collapsed_sections: &'a HashSet<ItemSection>,
     selection: &'a EditorSelection,
     selected_beam_id: Option<Uuid>,
+    width: f32,
 ) -> Element<'a, Message> {
     let mut panel_content: Column<'_, Message> = column![].spacing(2);
 
@@ -138,7 +139,7 @@ pub fn view_items_panel<'a>(
     panel_content = panel_content.push(future_sections);
 
     let panel = container(scrollable(panel_content.padding(4)))
-        .width(Length::Fixed(170.0))
+        .width(Length::Fixed(width))
         .height(Length::Fill)
         .style(container::bordered_box)
         .padding(4);
