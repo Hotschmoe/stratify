@@ -1,118 +1,248 @@
-# CLAUDE.md
+# CLAUDE.md — Stratify
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## RULE 1 – ABSOLUTE (DO NOT EVER VIOLATE THIS)
 
-## Project Overview
+You may NOT delete any file or directory unless I explicitly give the exact command **in this session**.
 
-Stratify is a cross-platform structural engineering calculation suite written in Rust. It provides native desktop applications (Windows, macOS, Linux) and a WebAssembly-based web application for structural analysis, design, and PDF report generation.
+- This includes files you just created (tests, tmp files, scripts, etc.).
+- You do not get to decide that something is "safe" to remove.
+- If you think something should be removed, stop and ask. You must receive clear written approval **before** any deletion command is even proposed.
 
-# Agent Instructions
-
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
-
-## Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
-```
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-
-<!-- bv-agent-instructions-v1 -->
+Treat "never delete files without permission" as a hard invariant.
 
 ---
 
-## Beads Workflow Integration
+### IRREVERSIBLE GIT & FILESYSTEM ACTIONS
 
-This project uses [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) for issue tracking. Issues are stored in `.beads/` and tracked in git.
+Absolutely forbidden unless I give the **exact command and explicit approval** in the same message:
 
-### Essential Commands
+- `git reset --hard`
+- `git clean -fd`
+- `rm -rf`
+- Any command that can delete or overwrite code/data
 
-```bash
-# View issues (launches TUI - avoid in automated sessions)
-bv
+Rules:
 
-# CLI commands for agents (use these instead)
-bd ready              # Show issues ready to work (no blockers)
-bd list --status=open # All open issues
-bd show <id>          # Full issue details with dependencies
-bd create --title="..." --type=task --priority=2
-bd update <id> --status=in_progress
-bd close <id> --reason="Completed"
-bd close <id1> <id2>  # Close multiple issues at once
-bd sync               # Commit and push changes
+1. If you are not 100% sure what a command will delete, do not propose or run it. Ask first.
+2. Prefer safe tools: `git status`, `git diff`, `git stash`, copying to backups, etc.
+3. After approval, restate the command verbatim, list what it will affect, and wait for confirmation.
+4. When a destructive command is run, record in your response:
+   - The exact user text authorizing it
+   - The command run
+   - When you ran it
+
+If that audit trail is missing, then you must act as if the operation never happened.
+
+---
+
+### Code Editing Discipline
+
+- Do **not** run scripts that bulk-modify code (codemods, invented one-off scripts, giant `sed`/regex refactors).
+- Large mechanical changes: break into smaller, explicit edits and review diffs.
+- Subtle/complex changes: edit by hand, file-by-file, with careful reasoning.
+- **NO EMOJIS** - do not use emojis or non-textual characters.
+- ASCII diagrams are encouraged for visualizing flows.
+- Keep in-line comments to a minimum. Use external documentation for complex logic.
+- In-line commentary should be value-add, concise, and focused on info not easily gleaned from the code.
+
+---
+
+### Backwards Compatibility & File Sprawl
+
+We optimize for a clean architecture, not backwards compatibility.
+
+- No "compat shims" or "v2" file clones.
+- When changing behavior, migrate callers and remove old code **inside the same file**.
+- New files are only for genuinely new domains that don't fit existing modules.
+- The bar for adding files is very high.
+
+---
+
+## Beads (bd) - Task Management
+
+Beads is a git-backed graph issue tracker. Use `--json` flags for all programmatic operations.
+
+### Session Workflow
+
+```
+1. bd prime              # Auto-injected via SessionStart hook
+2. bd ready --json       # Find unblocked work
+3. bd update <id> --status in_progress --json   # Claim task
+4. (do the work)
+5. bd close <id> --reason "Done" --json         # Complete task
+6. bd sync && git push   # End session - REQUIRED
 ```
 
-### Workflow Pattern
+### Key Commands
 
-1. **Start**: Run `bd ready` to find actionable work
-2. **Claim**: Use `bd update <id> --status=in_progress`
-3. **Work**: Implement the task
-4. **Complete**: Use `bd close <id>`
-5. **Sync**: Always run `bd sync` at session end
+| Action | Command |
+|--------|---------|
+| Find ready work | `bd ready --json` |
+| Find stale work | `bd stale --days 30 --json` |
+| Create issue | `bd create "Title" --description="Context" -t bug\|feature\|task -p 0-4 --json` |
+| Create discovered work | `bd create "Found bug" -t bug -p 1 --deps discovered-from:<parent-id> --json` |
+| Claim task | `bd update <id> --status in_progress --json` |
+| Complete task | `bd close <id> --reason "Done" --json` |
+| Find duplicates | `bd duplicates` |
+| Merge duplicates | `bd merge <id1> <id2> --into <canonical> --json` |
 
-### Key Concepts
+### Critical Rules
 
-- **Dependencies**: Issues can block other issues. `bd ready` shows only unblocked work.
-- **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers, not words)
-- **Types**: task, bug, feature, epic, question, docs
-- **Blocking**: `bd dep add <issue> <depends-on>` to add dependencies
+- Always include `--description` when creating issues - context prevents rework
+- Use `discovered-from` links to connect work found during implementation
+- Run `bd sync` at session end before pushing to git
+- **Work is incomplete until `git push` succeeds**
+- `.beads/` is authoritative state and **must always be committed** with code changes
 
-### Session Protocol
+### Dependency Thinking
 
-**Before ending any session, run this checklist:**
-
+Use requirement language, not temporal language:
 ```bash
-git status              # Check what changed
-git add <files>         # Stage code changes
-bd sync                 # Commit beads changes
-git commit -m "..."     # Commit code
-bd sync                 # Commit any new beads changes
-git push                # Push to remote
+bd dep add rendering layout      # rendering NEEDS layout (correct)
+# NOT: bd dep add phase1 phase2   (temporal - inverts direction)
 ```
 
-### Best Practices
+### After bd Upgrades
 
-- Check `bd ready` at session start to find available work
-- Update status as you work (in_progress → closed)
-- Create new issues with `bd create` when you discover tasks
-- Use descriptive titles and set appropriate priority/type
-- Always `bd sync` before ending session
+```bash
+bd info --whats-new              # Check workflow-impacting changes
+bd hooks install                 # Update git hooks
+bd daemons killall               # Restart daemons
+```
 
-<!-- end-bv-agent-instructions -->
+---
 
-**Current Status**: Phase 3 in progress. Point loads, wind uplift (±W), and equations module complete. **WASM browser support working** with Iced 0.14 + WebGPU. Run `bd ready` for current priorities or `bd list --status=open` for all open issues.
+## Beads Viewer (bv) - Triage Engine
 
-## Build Commands
+bv is a graph-aware triage engine for Beads projects. It provides precomputed metrics (PageRank, betweenness, critical path, cycles) without parsing JSONL or hallucinating graph traversal.
+
+> [!CAUTION]
+> Use ONLY `--robot-*` flags. Bare `bv` launches an interactive TUI that blocks your session.
+
+### Entry Point
+
+**`bv --robot-triage` is the single entry point.** It returns:
+- `quick_ref`: at-a-glance counts + top 3 picks
+- `recommendations`: ranked actionable items with scores
+- `quick_wins`: low-effort high-impact items
+- `blockers_to_clear`: items that unblock the most downstream work
+- `commands`: copy-paste shell commands for next steps
+
+```bash
+bv --robot-triage    # THE MEGA-COMMAND: start here
+bv --robot-next      # Minimal: just the single top pick
+```
+
+### Robot Commands
+
+| Command | Returns |
+|---------|---------|
+| `--robot-triage` | Full project snapshot with ranked recommendations |
+| `--robot-next` | Top priority item with claim command |
+| `--robot-plan` | Parallel execution tracks with `unblocks` lists |
+| `--robot-insights` | Full metrics: PageRank, betweenness, cycles, critical path |
+| `--robot-priority` | Priority misalignment detection |
+| `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |
+| `--robot-suggest` | Hygiene: duplicates, missing deps, cycle breaks |
+| `--robot-history` | Bead-to-commit correlations and event timelines |
+| `--robot-forecast <id\|all>` | Dependency-aware ETA predictions |
+
+### Filtering & Scoping
+
+```bash
+bv --robot-plan --label backend           # Scope to label
+bv --recipe actionable --robot-plan       # Pre-filter: ready to work
+bv --recipe high-impact --robot-triage    # Top PageRank items
+bv --robot-triage --robot-triage-by-track # Group by parallel work streams
+bv --robot-triage --robot-triage-by-label # Group by domain
+```
+
+### Graph Export
+
+```bash
+bv --robot-graph --graph-format=mermaid   # Mermaid diagram
+bv --robot-graph --graph-format=dot       # Graphviz DOT
+bv --export-graph graph.html              # Interactive HTML
+```
+
+### jq Quick Reference
+
+```bash
+bv --robot-triage | jq '.quick_ref'              # At-a-glance summary
+bv --robot-triage | jq '.recommendations[0]'     # Top recommendation
+bv --robot-plan | jq '.plan.summary.highest_impact'  # Best unblock target
+bv --robot-insights | jq '.Cycles'               # Circular deps (must fix!)
+```
+
+### Two-Phase Analysis
+
+- **Phase 1 (instant):** degree, topo sort, density - always available
+- **Phase 2 (async, 500ms timeout):** PageRank, betweenness, cycles - check `status` flags
+
+For large graphs (>500 nodes), some metrics may be approximated. Always check `status` in output.
+
+---
+
+## Session Completion Checklist
+
+```
+[ ] File issues for remaining work (bd create)
+[ ] Run quality gates (tests, linters)
+[ ] Update issue statuses (bd update/close)
+[ ] Run bd sync
+[ ] Run git push and verify success
+[ ] Confirm git status shows "up to date"
+```
+
+**Work is not complete until `git push` succeeds.**
+
+---
+
+## Claude Agents
+
+Two specialized agents are available in `.claude/agents/`:
+
+### coder-sonnet
+
+Fast code implementer for precise execution of tasks. Use for:
+- Quick, targeted code changes
+- Following existing patterns and conventions
+- Atomic commits with clear descriptions
+
+### gemini-analyzer
+
+Delegates large-context analysis to Gemini CLI. Use for:
+- Large pattern recognition across the codebase
+- Architecture analysis requiring 1M+ context
+- Full repository scans
+
+Commands:
+```bash
+gemini --all-files -p "prompt here"  # Full repo scan
+gemini -p "prompt here"              # Specific prompt
+```
+
+---
+
+## Contribution Policy
+
+Remove any mention of contributing/contributors from README and don't reinsert it.
+
+---
+
+# PROJECT-LANGUAGE-SPECIFIC: Rust
+
+> **To adapt for another language:** Replace this entire section with language-specific toolchain, testing, best practices, and code search examples.
+
+## Rust Toolchain
+
+- **Rust Edition**: 2021 (check `Cargo.toml` for exact version)
+- Build: `cargo build` (add `--release` for optimized builds)
+- Test: `cargo test` (185 tests: 149 unit + 36 doc)
+- Format: `cargo fmt` (run before commits)
+- Lint: `cargo clippy`
+
+### Key Commands
 
 ```bash
 # Build and run GUI (native)
@@ -121,7 +251,7 @@ cargo run --bin calc_gui
 # Build release
 cargo build --release --bin calc_gui
 
-# Run tests (185 tests: 149 unit + 36 doc)
+# Run all tests
 cargo test
 
 # Build CLI (placeholder only)
@@ -132,157 +262,149 @@ rustup target add wasm32-unknown-unknown
 cd calc_gui && trunk serve --open
 ```
 
-## Architecture
+### Cargo Workspace
 
-The project is a Rust workspace with three crates:
+- Lockfile: `Cargo.lock` (auto-managed by Cargo)
+- Dependencies: Defined in workspace `Cargo.toml`
+- Clean: `cargo clean` to remove build artifacts
 
-```
-stratify/
-├── calc_core/           # [LIB] Pure Rust calculation engine
-│   ├── calculations/    # Beam, column calculation modules
-│   │   ├── beam.rs      # BeamInput, BeamResult, calculate()
-│   │   ├── beam_analysis.rs # Superposition analysis, SingleLoad, diagrams
-│   │   └── column.rs    # Placeholder
-│   ├── equations/       # Documented statics formulas (for manual review)
-│   │   ├── beam.rs      # Point/uniform/partial load M, V, δ (Roark's refs)
-│   │   └── section.rs   # Rectangular A, I, S, r, nominal-to-actual
-│   ├── loads/           # Load handling
-│   │   ├── mod.rs       # LoadCase, DesignMethod (ASD/LRFD)
-│   │   ├── load_types.rs # LoadType enum (D, L, Lr, S, W, E, H)
-│   │   ├── discrete.rs  # DiscreteLoad, EnhancedLoadCase
-│   │   └── combinations.rs # ASCE 7 load combinations (±W for uplift)
-│   ├── materials/       # Material properties
-│   │   ├── mod.rs       # Material enum, unified interface
-│   │   ├── sawn_lumber.rs # WoodSpecies, WoodGrade, NDS Table 4A
-│   │   └── engineered_wood.rs # Glulam, LVL, PSL
-│   ├── nds_factors.rs   # NDS adjustment factors (C_D, C_M, C_t, etc.)
-│   ├── units.rs         # Type-safe wrappers: Feet, Inches, Kips, Psi
-│   ├── project.rs       # Project, ProjectMetadata, GlobalSettings
-│   ├── file_io.rs       # Atomic saves, FileLock with .lock files
-│   ├── pdf.rs           # Typst-based PDF generation
-│   └── errors.rs        # CalcError enum for structured errors
-├── calc_gui/            # [BIN] Iced 0.14 GUI application
-│   └── src/
-│       ├── main.rs      # App state, Message enum, update logic (~1500 lines)
-│       └── ui/          # Modular UI components (see GUI_LAYOUT.md)
-│           ├── mod.rs           # Module exports
-│           ├── toolbar.rs       # File operations, settings buttons
-│           ├── items_panel.rs   # Left sidebar: Project Info, Beams list
-│           ├── input_panel.rs   # Center panel dispatcher
-│           ├── input_project_info.rs  # Project info editor
-│           ├── input_wood_beam.rs     # Beam editor (spans, loads, material, NDS factors)
-│           ├── results_panel.rs # Right panel dispatcher
-│           ├── result_project_info.rs # Project summary view
-│           ├── result_wood_beam.rs    # Calculation results + diagrams
-│           ├── status_bar.rs    # Bottom status messages
-│           └── shared/
-│               ├── mod.rs       # Shared component exports
-│               └── diagrams.rs  # Canvas drawing (shear, moment, deflection)
-└── calc_cli/            # [BIN] Placeholder CLI
+---
+
+## Logging & Console Output
+
+- Use structured logging with `log` or `tracing` crates; avoid raw `println!` for production.
+- GUI output goes through Iced; CLI through ratatui if needed.
+- Errors should use `thiserror` or `anyhow` for context and chaining.
+
+---
+
+## Third-Party Libraries
+
+When unsure of an API, look up current docs rather than guessing. Key dependencies:
+
+- **iced 0.14**: GUI framework (Elm architecture) with canvas support
+- **ratatui**: TUI framework for CLI interfaces
+- **typst 0.14 + typst-pdf**: PDF generation with BerkeleyMono font
+- **serde / serde_json**: Serialization (JSON for `.stf` project files)
+- **fs2**: Cross-platform file locking for NAS/cloud drive safety
+- **rfd**: Native file dialogs
+- **wgpu 27.0**: WebGPU for native and WASM rendering
+- **trunk**: WASM build tool for browser deployment
+
+---
+
+## Testing Guidelines
+
+### Test Commands
+
+```bash
+cargo test                              # All tests (185: 149 unit + 36 doc)
+cargo test -- --nocapture               # Show println! output
+cargo test beam_                        # Run tests matching pattern
+cargo test --doc                        # Doc tests only
+cargo test -p calc_core                 # Tests for specific crate
 ```
 
-### GUI Panel Structure
+### Test Patterns
 
-See `calc_gui/GUI_LAYOUT.md` for detailed layout. The GUI uses a modular architecture:
+- Use `#[test]` attribute for unit tests
+- Use `#[cfg(test)]` modules for test-only code
+- Use `tempfile` crate for temporary files
+- Use `assert!`, `assert_eq!`, `assert_ne!` macros
+- Doc tests: code blocks in `///` comments are tested automatically
 
-- **main.rs**: App state (App struct), Message enum, update logic, and view orchestration
-- **ui/**: Modular panel components with dispatcher pattern
-  - `toolbar.rs`: File ops (New, Open, Save, Export PDF), theme toggle
-  - `items_panel.rs`: Left sidebar with Project Info and Beams list
-  - `input_panel.rs`: Dispatcher that routes to input_project_info or input_wood_beam
-  - `results_panel.rs`: Dispatcher that routes to result_project_info or result_wood_beam
-  - `status_bar.rs`: File path, lock status, messages
-  - `shared/diagrams.rs`: Canvas drawing for beam schematic and V/M/δ diagrams
+---
 
-**Adding a new item type** (e.g., columns):
-1. Create `input_wood_column.rs` with the editor UI
-2. Create `result_wood_column.rs` with results display
-3. Add `Column` variant to `EditorSelection` in main.rs
-4. Update dispatchers in `input_panel.rs` and `results_panel.rs`
-5. Update `items_panel.rs` to enable the section
+## Rust Best Practices
 
-### Key Architectural Principles
+### Error Handling
 
-- **calc_core is the source of truth**: All engineering logic, data structures, serialization, and PDF generation live here. No UI dependencies.
-- **GUI and CLI are thin wrappers**: They import calc_core and handle only user interaction/rendering.
-- **Data permanence first**: Atomic saves (write to .tmp, verify, rename), sentinel file locking (.lock files), human-readable JSON for recoverability.
-- **Stateless calculations**: Pure functions that take input structs and return result structs. No global state.
-
-### File Format
-
-Projects use `.stf` extension (JSON). Items are stored in a flat UUID-keyed map for O(1) lookups:
-
-```json
-{
-  "meta": { "version": "0.1.0", "engineer": "Name", "job_id": "25-001", ... },
-  "settings": { "code": "IBC2024", "design_method": "Asd", ... },
-  "items": {
-    "uuid-here": {
-      "Beam": {
-        "label": "B-1",
-        "span_ft": 12.0,
-        "load_case": { "loads": [...], "include_self_weight": true },
-        "material": { "SawnLumber": { "species": "DouglasFirLarch", "grade": "No2" } },
-        "width_in": 1.5,
-        "depth_in": 9.25,
-        "adjustment_factors": { "load_duration": "Normal", "wet_service": "Dry", ... }
-      }
-    }
-  }
+```rust
+// Use Result and the ? operator for propagation
+fn load_config() -> Result<Config, CalcError> {
+    let content = std::fs::read_to_string(path)?;
+    let config: Config = serde_json::from_str(&content)?;
+    Ok(config)
 }
+
+// Use .context() with anyhow for additional context
+use anyhow::Context;
+let data = read_file().context("failed to load project")?;
 ```
 
-## Current Implementation
+### Option Handling
 
-### What's Working
-- **Beam calculations**: Simply-supported with uniform/point loads, superposition analysis
-- **Point loads**: Full support with correct M, V, δ formulas at any position
-- **Wind uplift**: ±W combinations for uplift design, min/max reactions tracked
-- **NDS adjustment factors**: C_D, C_M, C_t, C_L, C_F, C_fu, C_i, C_r with GUI controls
-- **Load combinations**: ASCE 7 ASD (21 combos) and LRFD (23 combos) with ±W uplift
-- **Discrete loads**: Multiple loads per beam (D, L, Lr, S, W, E, H), point and uniform
-- **Wood materials**: Sawn lumber (5 species, 8 grades), Glulam, LVL, PSL
-- **PDF export**: Professional reports with Typst, multi-beam export
-- **GUI**: Live preview, auto-save, diagram rendering, file locking
-- **Diagrams**: Beam schematic with reactions, shear (V), moment (M), deflection (δ)
-- **Equations module**: Documented statics formulas with Roark's references
+```rust
+// Prefer pattern matching or combinators over unwrap()
+if let Some(item) = items.get(index) {
+    // safe to use item
+}
 
-### What's Placeholder/Incomplete
-- Column calculations (stub only)
-- Steel and concrete materials
-- Partial uniform loads (structure ready, formulas implemented)
-- CLI interface (basic stdin demo only)
+// Use unwrap_or, unwrap_or_default, or unwrap_or_else
+let value = optional.unwrap_or(default_value);
+```
 
-## Tech Stack
+### Division Safety
 
-- **GUI**: Iced 0.14 with canvas feature for diagrams, wgpu 27.0 for WebGPU
-- **PDF**: typst 0.14 + typst-pdf + typst-assets (BerkeleyMono font)
-- **Serialization**: serde/serde_json
-- **File Locking**: fs2 for cross-platform network drive safety
-- **File Dialogs**: rfd (native file dialogs)
-- **Units**: Wrapper types around f64 with From/Into traits
+```rust
+// Guard against division by zero
+let avg = if !items.is_empty() {
+    total / items.len() as f64
+} else {
+    0.0
+};
+```
 
-## Engineering Context
+### Ownership & Borrowing
 
-- US codes only: IBC 2024, ASCE 7, NDS 2018 (wood)
-- Current focus: Wood beam design at full depth
-- Future: Steel (AISC 360), concrete (ACI 318)
+```rust
+// Prefer borrowing over cloning when possible
+fn process(data: &BeamInput) -> BeamResult { ... }
 
-### NDS Adjustment Factors (Implemented)
-All factors in `calc_core/src/nds_factors.rs`:
-- C_D: Load duration (Permanent 0.9 → Impact 2.0)
-- C_M: Wet service (Dry 1.0, Wet 0.85-0.97)
-- C_t: Temperature (Normal 1.0, Elevated 0.7-0.8, High 0.5-0.7)
-- C_L: Beam stability (calculated from slenderness, or 1.0 if braced)
-- C_F: Size factor (from NDS Table 4A based on depth)
-- C_fu: Flat use factor
-- C_i: Incising factor (0.80-0.95 for incised lumber)
-- C_r: Repetitive member (1.15 for 3+ members at ≤24" OC)
+// Use Cow<str> for flexible string ownership
+use std::borrow::Cow;
+fn process_name(name: Cow<'_, str>) { ... }
+```
 
-## Design Decisions
+---
 
-- **Target users**: Small teams (3-5) on desktop, files on NAS/Google Drive
-- **Offline-first**: No network connectivity required, no license checks
-- **Robust file locking**: Critical for NAS/cloud drive scenarios
-- **Rust edition**: 2021
-- **Keep it simple**: Direct, readable code over clever patterns
+## Code Search Tools
+
+### ripgrep (rg) — Fast Text Search
+
+Use when searching for literal strings or regex patterns:
+
+```bash
+rg "unwrap()" -t rust              # Find all unwrap() calls
+rg "TODO|FIXME" -t rust            # Find todos
+rg "pub fn" src/                   # Find public functions
+rg -l "BeamInput" -t rust          # List files containing pattern
+rg -n "impl.*Display" -t rust      # Show line numbers
+```
+
+### ast-grep — Structural Code Search
+
+Use when you need syntax-aware matching (ignores comments/strings, understands code structure):
+
+```bash
+ast-grep run -l rust -p '$X.unwrap()'        # Find all unwrap() calls
+ast-grep run -l rust -p 'panic!($$$)'        # Find all panic! macros
+ast-grep run -l rust -p 'fn $NAME() { $$$ }' # Find functions with no params
+ast-grep run -l rust -p 'clone()'            # Find all clone() calls
+```
+
+**When to use which:**
+- **ripgrep**: Quick searches, TODOs, config values, recon
+- **ast-grep**: Refactoring patterns, finding anti-patterns, policy checks
+
+---
+
+## Bug Severity (Rust-specific)
+
+- **Critical**: `unwrap()` on None/Err in production paths, division by zero, panics, memory leaks (e.g., `Rc` cycles)
+- **Important**: Missing error propagation (`?`), `clone()` where borrow would suffice, unsafe blocks without justification
+- **Contextual**: TODO/FIXME, unused imports, dead code warnings
+
+---
+
+we love you, Claude! do your best today
