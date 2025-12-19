@@ -24,8 +24,8 @@ pub fn view_results_panel(app: &App, input_ratio: f32) -> Element<'_, Message> {
             text(error).size(12).color([0.8, 0.2, 0.2]),
         ]
     } else if let (Some(ref input), Some(ref result)) = (&app.calc_input, &app.result) {
-        // Show beam calculation results
-        result_wood_beam::view(input, result)
+        // Show beam calculation results with tabs
+        result_wood_beam::view(input, result, app.selected_results_tab)
     } else {
         // Show project summary
         result_project_info::view(&app.project)

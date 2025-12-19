@@ -157,6 +157,32 @@ impl std::fmt::Display for InputTab {
     }
 }
 
+/// Results panel tabs for organizing output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResultsTab {
+    /// Numerical calculation results
+    #[default]
+    Results,
+    /// Visual diagrams (V, M, δ)
+    Diagrams,
+}
+
+impl ResultsTab {
+    pub const ALL: [ResultsTab; 2] = [
+        ResultsTab::Results,
+        ResultsTab::Diagrams,
+    ];
+}
+
+impl std::fmt::Display for ResultsTab {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResultsTab::Results => write!(f, "Results"),
+            ResultsTab::Diagrams => write!(f, "Diagrams"),
+        }
+    }
+}
+
 /// A row in the span table (for multi-span beams)
 #[derive(Debug, Clone)]
 pub struct SpanTableRow {
@@ -377,6 +403,9 @@ pub struct App {
 
     // Input panel tabs
     pub selected_input_tab: InputTab,
+
+    // Results panel tabs
+    pub selected_results_tab: ResultsTab,
 }
 
 impl Default for App {
@@ -460,6 +489,7 @@ impl Default for App {
             drag_start_x: 0.0,
             drag_start_value: 0.0,
             selected_input_tab: InputTab::default(),
+            selected_results_tab: ResultsTab::default(),
         }
     }
 }
@@ -602,6 +632,9 @@ pub enum Message {
 
     // Input panel tabs
     SelectInputTab(InputTab),
+
+    // Results panel tabs
+    SelectResultsTab(ResultsTab),
 }
 
 // ============================================================================
@@ -1035,6 +1068,10 @@ impl App {
 
             Message::SelectInputTab(tab) => {
                 self.selected_input_tab = tab;
+            }
+
+            Message::SelectResultsTab(tab) => {
+                self.selected_results_tab = tab;
             }
         }
         Task::none()
