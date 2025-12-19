@@ -29,6 +29,7 @@
 pub mod sawn_lumber;
 pub mod engineered_wood;
 pub mod lumber_sizes;
+pub mod steel;
 
 // Re-export sawn lumber types
 pub use sawn_lumber::{WoodSpecies, WoodGrade, WoodProperties, WoodMaterial};
@@ -42,6 +43,9 @@ pub use engineered_wood::{
     LvlGrade, LvlProperties, LvlMaterial,
     PslGrade, PslProperties, PslMaterial,
 };
+
+// Re-export steel types
+pub use steel::{ShapeType, SteelShape, SteelShapeDb, builtin_common_shapes};
 
 use serde::{Deserialize, Serialize};
 
