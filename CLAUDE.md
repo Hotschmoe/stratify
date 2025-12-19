@@ -110,7 +110,7 @@ git push                # Push to remote
 
 <!-- end-bv-agent-instructions -->
 
-**Current Status**: Phase 3 in progress. Point loads, wind uplift (±W), and equations module complete. **WASM browser support working** with Iced 0.14 + WebGPU. See `ROADMAP.md` for detailed progress and `NEXT_TODO.md` for current priorities.
+**Current Status**: Phase 3 in progress. Point loads, wind uplift (±W), and equations module complete. **WASM browser support working** with Iced 0.14 + WebGPU. Run `bd ready` for current priorities or `bd list --status=open` for all open issues.
 
 ## Build Commands
 
