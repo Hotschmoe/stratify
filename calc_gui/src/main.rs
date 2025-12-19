@@ -1427,6 +1427,16 @@ impl App {
             Ok(v) if v > 0.0 => v,
             _ => return,
         };
+
+        // Calculate total beam length for load positioning
+        let total_length_ft = if self.multi_span_mode && self.span_table.len() > 1 {
+            self.span_table.iter()
+                .filter_map(|s| s.length_ft.parse::<f64>().ok())
+                .filter(|&v| v > 0.0)
+                .sum()
+        } else {
+            span_ft
+        };
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => return,
@@ -1467,7 +1477,7 @@ impl App {
         load_case.include_self_weight = self.include_self_weight;
 
         for row in &self.load_table {
-            if let Some(load) = row.to_discrete_load(span_ft) {
+            if let Some(load) = row.to_discrete_load(total_length_ft) {
                 load_case = load_case.with_load(load);
             }
         }
@@ -1535,6 +1545,17 @@ impl App {
             Ok(v) if v > 0.0 => v,
             _ => { self.result = None; self.calc_input = None; return; }
         };
+
+        // Calculate total beam length for load positioning
+        let total_length_ft = if self.multi_span_mode && self.span_table.len() > 1 {
+            self.span_table.iter()
+                .filter_map(|s| s.length_ft.parse::<f64>().ok())
+                .filter(|&v| v > 0.0)
+                .sum()
+        } else {
+            span_ft
+        };
+
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => { self.result = None; self.calc_input = None; return; }
@@ -1575,7 +1596,7 @@ impl App {
         load_case.include_self_weight = self.include_self_weight;
 
         for row in &self.load_table {
-            if let Some(load) = row.to_discrete_load(span_ft) {
+            if let Some(load) = row.to_discrete_load(total_length_ft) {
                 load_case = load_case.with_load(load);
             }
         }
