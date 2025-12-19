@@ -592,8 +592,13 @@ impl BeamDiagram {
         color: Color,
         axis_color: Color,
     ) {
-        let center_y = y + height / 2.0;
-        let plot_height = height * 0.35;
+        // Internal margins to keep content within bounds
+        let top_margin = 18.0;    // Space for title
+        let bottom_margin = 12.0; // Space for labels
+        let usable_height = height - top_margin - bottom_margin;
+
+        let center_y = y + top_margin + usable_height / 2.0;
+        let plot_height = usable_height * 0.4;  // 40% above and below axis
 
         // Axis line
         let axis = Path::line(
@@ -652,10 +657,10 @@ impl BeamDiagram {
             }
         }
 
-        // Labels
+        // Labels - positioned within bounds
         let title = Text {
             content: "Shear (V)".to_string(),
-            position: Point::new(x + 5.0, y + 5.0),
+            position: Point::new(x + 5.0, y + 3.0),
             color,
             size: iced::Pixels(10.0),
             ..Text::default()
@@ -664,7 +669,7 @@ impl BeamDiagram {
 
         let max_label = Text {
             content: format!("+{:.0} lb", self.data.max_shear_lb),
-            position: Point::new(x + 5.0, center_y - plot_height - 2.0),
+            position: Point::new(x + 55.0, y + 3.0),  // Next to title
             color,
             size: iced::Pixels(9.0),
             ..Text::default()
@@ -673,7 +678,7 @@ impl BeamDiagram {
 
         let min_label = Text {
             content: format!("-{:.0} lb", self.data.max_shear_lb),
-            position: Point::new(x + width - 50.0, center_y + plot_height + 10.0),
+            position: Point::new(x + width - 55.0, y + 3.0),  // Right side of title row
             color,
             size: iced::Pixels(9.0),
             ..Text::default()
@@ -691,8 +696,13 @@ impl BeamDiagram {
         color: Color,
         axis_color: Color,
     ) {
-        let axis_y = y + height * 0.15;
-        let plot_height = height * 0.7;
+        // Internal margins to keep content within bounds
+        let top_margin = 18.0;    // Space for title/axis
+        let bottom_margin = 8.0;  // Small bottom margin
+        let usable_height = height - top_margin - bottom_margin;
+
+        let axis_y = y + top_margin;
+        let plot_height = usable_height * 0.85;  // Moment goes downward from axis
 
         // Axis line
         let axis = Path::line(
@@ -737,10 +747,10 @@ impl BeamDiagram {
             frame.stroke(&outline, Stroke::default().with_color(color).with_width(2.0));
         }
 
-        // Labels
+        // Labels - positioned within bounds
         let title = Text {
             content: "Moment (M)".to_string(),
-            position: Point::new(x + 5.0, y + 5.0),
+            position: Point::new(x + 5.0, y + 3.0),
             color,
             size: iced::Pixels(10.0),
             ..Text::default()
@@ -748,11 +758,10 @@ impl BeamDiagram {
         frame.fill_text(title);
 
         let max_label = Text {
-            content: format!("{:.0} ft-lb", self.data.max_moment_ftlb),
-            position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
+            content: format!("Max: {:.0} ft-lb", self.data.max_moment_ftlb),
+            position: Point::new(x + 75.0, y + 3.0),  // Next to title
             color,
             size: iced::Pixels(9.0),
-            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(max_label);
@@ -768,8 +777,13 @@ impl BeamDiagram {
         color: Color,
         axis_color: Color,
     ) {
-        let axis_y = y + height * 0.15;
-        let plot_height = height * 0.6;
+        // Internal margins to keep content within bounds
+        let top_margin = 18.0;    // Space for title/axis
+        let bottom_margin = 8.0;  // Small bottom margin
+        let usable_height = height - top_margin - bottom_margin;
+
+        let axis_y = y + top_margin;
+        let plot_height = usable_height * 0.85;  // Deflection goes downward from axis
 
         // Axis line (represents undeflected beam)
         let axis = Path::line(
@@ -814,10 +828,10 @@ impl BeamDiagram {
             frame.fill(&fill_path, Color { a: 0.2, ..color });
         }
 
-        // Labels
+        // Labels - positioned within bounds
         let title = Text {
             content: "Deflection (δ)".to_string(),
-            position: Point::new(x + 5.0, y + 5.0),
+            position: Point::new(x + 5.0, y + 3.0),
             color,
             size: iced::Pixels(10.0),
             ..Text::default()
@@ -825,11 +839,10 @@ impl BeamDiagram {
         frame.fill_text(title);
 
         let max_label = Text {
-            content: format!("{:.3} in", self.data.max_deflection_in),
-            position: Point::new(x + width / 2.0, axis_y + plot_height + 10.0),
+            content: format!("Max: {:.3} in", self.data.max_deflection_in),
+            position: Point::new(x + 85.0, y + 3.0),  // Next to title
             color,
             size: iced::Pixels(9.0),
-            align_x: iced::alignment::Horizontal::Center.into(),
             ..Text::default()
         };
         frame.fill_text(max_label);
@@ -852,8 +865,10 @@ impl canvas::Program<Message> for BeamDiagram {
         let width = bounds.width;
         let height = bounds.height;
 
-        // Layout: divide into 4 sections vertically
-        let section_height = height / 4.0;
+        // Layout: divide into 4 sections with padding between them
+        let section_padding = 12.0;  // Padding between sections to prevent label overlap
+        let total_padding = section_padding * 3.0;  // 3 gaps between 4 sections
+        let section_height = (height - total_padding) / 4.0;
         let margin = 20.0;
         let plot_width = width - 2.0 * margin;
 
@@ -864,14 +879,20 @@ impl canvas::Program<Message> for BeamDiagram {
         let defl_color = Color::from_rgb(0.2, 0.7, 0.3);
         let axis_color = Color::from_rgb(0.5, 0.5, 0.5);
 
-        // Section 1: Beam schematic with uniform load
-        self.draw_beam_schematic(&mut frame, margin, 0.0, plot_width, section_height, beam_color);
+        // Calculate section Y positions with padding
+        let section1_y = 0.0;
+        let section2_y = section_height + section_padding;
+        let section3_y = (section_height + section_padding) * 2.0;
+        let section4_y = (section_height + section_padding) * 3.0;
+
+        // Section 1: Beam schematic with loads
+        self.draw_beam_schematic(&mut frame, margin, section1_y, plot_width, section_height, beam_color);
 
         // Section 2: Shear diagram
         self.draw_shear_diagram(
             &mut frame,
             margin,
-            section_height,
+            section2_y,
             plot_width,
             section_height,
             shear_color,
@@ -882,7 +903,7 @@ impl canvas::Program<Message> for BeamDiagram {
         self.draw_moment_diagram(
             &mut frame,
             margin,
-            section_height * 2.0,
+            section3_y,
             plot_width,
             section_height,
             moment_color,
@@ -893,7 +914,7 @@ impl canvas::Program<Message> for BeamDiagram {
         self.draw_deflection_diagram(
             &mut frame,
             margin,
-            section_height * 3.0,
+            section4_y,
             plot_width,
             section_height,
             defl_color,
