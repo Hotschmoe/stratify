@@ -107,6 +107,72 @@ pub enum ItemSection {
     RestrainedWalls,
 }
 
+/// Categories of items that can be added to a project via the category picker
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ItemCategory {
+    // Beams
+    WoodBeams,
+    // SteelBeams,      // Future
+    // ContinuousBeams, // Future
+
+    // Posts/Columns
+    // WoodColumns,     // Future
+    // SteelColumns,    // Future
+
+    // Foundations
+    // SpreadFootings,  // Future
+    // CombinedFootings,// Future
+
+    // Retaining
+    CantileverRetainingWalls,
+    // GravityWalls,    // Future
+
+    // Misc
+    // Connections,     // Future
+}
+
+impl ItemCategory {
+    /// All currently implemented categories
+    pub const IMPLEMENTED: &'static [ItemCategory] = &[
+        ItemCategory::WoodBeams,
+    ];
+
+    /// All categories (including future/unimplemented)
+    pub const ALL: &'static [ItemCategory] = &[
+        ItemCategory::WoodBeams,
+        ItemCategory::CantileverRetainingWalls,
+    ];
+
+    /// Display name for the category
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ItemCategory::WoodBeams => "Wood Beams",
+            ItemCategory::CantileverRetainingWalls => "Cantilever Retaining Walls",
+        }
+    }
+
+    /// Whether this category is implemented
+    pub fn is_implemented(&self) -> bool {
+        matches!(self, ItemCategory::WoodBeams)
+    }
+
+    /// Get the corresponding ItemSection for this category
+    pub fn to_section(&self) -> ItemSection {
+        match self {
+            ItemCategory::WoodBeams => ItemSection::WoodBeams,
+            ItemCategory::CantileverRetainingWalls => ItemSection::CantileverWalls,
+        }
+    }
+
+    /// Group name for organizing in tabs
+    pub fn group(&self) -> &'static str {
+        match self {
+            ItemCategory::WoodBeams => "Beams",
+            ItemCategory::CantileverRetainingWalls => "Retaining",
+        }
+    }
+}
+
 /// What is currently being edited in the middle panel
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorSelection {
@@ -332,6 +398,7 @@ pub struct App {
 
     // Left panel state
     pub collapsed_sections: HashSet<ItemSection>,
+    pub enabled_categories: HashSet<ItemCategory>,
 
     // Current editor selection
     pub selection: EditorSelection,
@@ -440,6 +507,7 @@ impl Default for App {
             is_modified: false,
             lock_holder: None,
             collapsed_sections: HashSet::new(),
+            enabled_categories: HashSet::new(), // Start empty; user adds categories via picker
             selection: EditorSelection::ProjectInfo,
             beam_label: "B-1".to_string(),
             span_ft: "12.0".to_string(),
@@ -624,6 +692,11 @@ pub enum Message {
     ModalSave,
     ModalDontSave,
     ModalCancel,
+
+    // Category picker
+    OpenCategoryPicker,
+    AddCategory(ItemCategory),
+    CloseCategoryPicker,
 
     // Panel resizing
     DividerDragStart(DividerType, f32), // divider type, initial x position
@@ -1017,6 +1090,21 @@ impl App {
                 }
             }
             Message::ModalCancel => {
+                self.active_modal = None;
+            }
+
+            // Category picker
+            Message::OpenCategoryPicker => {
+                self.active_modal = Some(ModalType::CategoryPicker);
+            }
+            Message::AddCategory(category) => {
+                self.enabled_categories.insert(category);
+                // If category was just added, auto-expand it
+                self.collapsed_sections.remove(&category.to_section());
+                self.active_modal = None;
+                self.status = format!("Added {} category", category.display_name());
+            }
+            Message::CloseCategoryPicker => {
                 self.active_modal = None;
             }
 
@@ -1717,6 +1805,7 @@ impl App {
             ui::items_panel::view_items_panel(
                 &self.project,
                 &self.collapsed_sections,
+                &self.enabled_categories,
                 &self.selection,
                 self.selected_beam_id(),
                 self.items_panel_width,
