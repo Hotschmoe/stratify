@@ -111,7 +111,9 @@ impl BeamDiagram {
         height: f32,
         color: Color,
     ) {
-        let beam_y = y + height * 0.55;
+        // Position beam lower to give more space for load arrows above
+        // At 70% down, with section_height=100px, this gives ~70px for loads
+        let beam_y = y + height * 0.70;
         let beam_thickness = 4.0;
         let support_size = 10.0;
         let total_length = self.data.total_length_ft;
@@ -309,14 +311,15 @@ impl BeamDiagram {
         let num_loads = self.data.discrete_loads.len();
 
         // Calculate available space for loads (from top margin to just above beam)
-        let top_margin = 12.0_f32;  // Space for top label
-        let arrow_gap = 5.0_f32;    // Gap between arrows and beam
+        // With beam at 70% and section_height ~100px, we have ~70px for loads
+        let top_margin = 8.0_f32;   // Space for top label
+        let arrow_gap = 4.0_f32;    // Gap between arrows and beam
         let available_height = beam_y - y - top_margin - arrow_gap;
 
         // Dynamic sizing based on number of loads
-        // Each load needs space for: arrow + label
-        let min_row_height = 16.0_f32;  // Minimum to keep readable
-        let max_row_height = 24.0_f32;  // Maximum comfortable spacing
+        // Target: 5 loads should fit comfortably with ~12px each
+        let min_row_height = 10.0_f32;  // Minimum to keep readable (compressed)
+        let max_row_height = 18.0_f32;  // Maximum comfortable spacing (1-2 loads)
         let load_row_height = (available_height / num_loads as f32)
             .clamp(min_row_height, max_row_height);
 
