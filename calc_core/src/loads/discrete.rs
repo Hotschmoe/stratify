@@ -217,11 +217,11 @@ pub struct EnhancedLoadCase {
 }
 
 impl EnhancedLoadCase {
-    /// Create a new empty load case
+    /// Create a new empty load case (self-weight included by default)
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             loads: Vec::new(),
-            include_self_weight: false,
+            include_self_weight: true,
             label: label.into(),
         }
     }
@@ -235,6 +235,12 @@ impl EnhancedLoadCase {
     /// Enable self-weight inclusion and return self (builder pattern)
     pub fn with_self_weight(mut self) -> Self {
         self.include_self_weight = true;
+        self
+    }
+
+    /// Disable self-weight inclusion and return self (builder pattern)
+    pub fn without_self_weight(mut self) -> Self {
+        self.include_self_weight = false;
         self
     }
 

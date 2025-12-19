@@ -731,6 +731,7 @@ mod tests {
     /// Create a test beam with D+L = 150 plf total (like old uniform_load_plf: 150.0)
     fn test_beam() -> BeamInput {
         let load_case = EnhancedLoadCase::new("Test Loads")
+            .without_self_weight() // Tests use explicit load values
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
             .with_load(DiscreteLoad::uniform(LoadType::Live, 100.0));
 
@@ -910,11 +911,12 @@ mod tests {
     #[test]
     fn test_self_weight_inclusion() {
         let load_case_no_sw = EnhancedLoadCase::new("No Self-Weight")
+            .without_self_weight()
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
 
         let load_case_with_sw = EnhancedLoadCase::new("With Self-Weight")
-            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))
-            .with_self_weight();
+            .with_self_weight()
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0));
 
         let beam_no_sw = BeamInput {
             label: "No SW".to_string(),
@@ -976,6 +978,7 @@ mod tests {
         // 10 ft beam with 1000 lb point load at midspan
         // M_max = PL/4 = 1000 * 10 / 4 = 2500 ft-lb
         let load_case = EnhancedLoadCase::new("Point Load Test")
+            .without_self_weight()
             .with_load(DiscreteLoad::point(LoadType::Live, 1000.0, 5.0));
 
         let beam = BeamInput {
@@ -1015,6 +1018,7 @@ mod tests {
         // R2 = Pa/L = 1000 * 3/10 = 300 lb
         // M_max at load point = R1 * a = 700 * 3 = 2100 ft-lb
         let load_case = EnhancedLoadCase::new("Asymmetric Point Load")
+            .without_self_weight()
             .with_load(DiscreteLoad::point(LoadType::Live, 1000.0, 3.0));
 
         let beam = BeamInput {
@@ -1120,6 +1124,7 @@ mod tests {
         // Roof beam with light dead load and significant wind uplift
         // D = 10 plf, W = 30 plf (entered positive, applied as uplift via -W combinations)
         let load_case = EnhancedLoadCase::new("Roof with Wind")
+            .without_self_weight()
             .with_load(DiscreteLoad::uniform(LoadType::Dead, 10.0))
             .with_load(DiscreteLoad::uniform(LoadType::Wind, 30.0));
 
