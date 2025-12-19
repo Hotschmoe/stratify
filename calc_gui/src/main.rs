@@ -118,6 +118,15 @@ pub enum EditorSelection {
     Beam(Option<Uuid>),
 }
 
+/// Which panel divider is being dragged
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DividerType {
+    /// Divider between items panel and input panel
+    ItemsInput,
+    /// Divider between input panel and results panel
+    InputResults,
+}
+
 /// A row in the span table (for multi-span beams)
 #[derive(Debug, Clone)]
 pub struct SpanTableRow {
@@ -328,6 +337,13 @@ pub struct App {
 
     // Modal state
     pub active_modal: Option<ModalType>,
+
+    // Panel resizing
+    pub items_panel_width: f32,
+    pub input_panel_ratio: f32, // Ratio of (input_panel / (input_panel + results_panel))
+    pub dragging_divider: Option<DividerType>,
+    pub drag_start_x: f32,
+    pub drag_start_value: f32, // Width for items panel, ratio for input panel
 }
 
 impl Default for App {
@@ -405,6 +421,11 @@ impl Default for App {
             dark_mode: false,
             settings_menu_open: false,
             active_modal: None,
+            items_panel_width: 170.0,
+            input_panel_ratio: 0.5,
+            dragging_divider: None,
+            drag_start_x: 0.0,
+            drag_start_value: 0.0,
         }
     }
 }
@@ -539,6 +560,11 @@ pub enum Message {
     ModalSave,
     ModalDontSave,
     ModalCancel,
+
+    // Panel resizing
+    DividerDragStart(DividerType, f32), // divider type, initial x position
+    DividerDragMove(f32),               // current x position
+    DividerDragEnd,
 }
 
 // ============================================================================
@@ -557,6 +583,13 @@ impl App {
                     }
                 }
                 Some(Message::KeyPressed(key, modifiers))
+            }
+            // Always listen for mouse events - filtering happens in update()
+            Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                Some(Message::DividerDragMove(position.x))
+            }
+            Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
+                Some(Message::DividerDragEnd)
             }
             _ => None,
         })
@@ -915,6 +948,52 @@ impl App {
             }
             Message::ModalCancel => {
                 self.active_modal = None;
+            }
+
+            // Panel resizing
+            Message::DividerDragStart(divider, _) => {
+                // Mark that we're starting to drag, but wait for first mouse move
+                // to capture the actual cursor position (button sends x=0)
+                self.dragging_divider = Some(divider);
+                self.drag_start_x = -1.0; // Sentinel value: not yet captured
+                match divider {
+                    DividerType::ItemsInput => {
+                        self.drag_start_value = self.items_panel_width;
+                    }
+                    DividerType::InputResults => {
+                        self.drag_start_value = self.input_panel_ratio;
+                    }
+                }
+            }
+            Message::DividerDragMove(x) => {
+                if let Some(divider) = self.dragging_divider {
+                    // Capture the start position on first move
+                    if self.drag_start_x < 0.0 {
+                        self.drag_start_x = x;
+                        return Task::none();
+                    }
+
+                    let delta = x - self.drag_start_x;
+                    match divider {
+                        DividerType::ItemsInput => {
+                            // Adjust items panel width with constraints
+                            let new_width = (self.drag_start_value + delta).clamp(120.0, 400.0);
+                            self.items_panel_width = new_width;
+                        }
+                        DividerType::InputResults => {
+                            // For the second divider, we need to calculate ratio change
+                            // Assume total available width for input+results is roughly 800px
+                            // This is approximate - the actual width depends on window size
+                            // A delta of 100px should move the ratio by about 0.1
+                            let ratio_delta = delta / 800.0;
+                            let new_ratio = (self.drag_start_value + ratio_delta).clamp(0.2, 0.8);
+                            self.input_panel_ratio = new_ratio;
+                        }
+                    }
+                }
+            }
+            Message::DividerDragEnd => {
+                self.dragging_divider = None;
             }
         }
         Task::none()
@@ -1523,17 +1602,25 @@ impl App {
         // Build header with stored window title
         let header = ui::toolbar::view_header_owned(self.window_title());
 
+        // Check which divider is being dragged
+        let dragging_items_input = matches!(self.dragging_divider, Some(DividerType::ItemsInput));
+        let dragging_input_results = matches!(self.dragging_divider, Some(DividerType::InputResults));
+
+        // Build content row with draggable dividers between panels
+        // Layout: items_panel | divider | input_panel | divider | results_panel
         let content = row![
             ui::items_panel::view_items_panel(
                 &self.project,
                 &self.collapsed_sections,
                 &self.selection,
                 self.selected_beam_id(),
+                self.items_panel_width,
             ),
-            ui::input_panel::view_input_panel(self),
-            ui::results_panel::view_results_panel(self),
-        ]
-        .spacing(10);
+            ui::shared::divider::view_divider(DividerType::ItemsInput, dragging_items_input),
+            ui::input_panel::view_input_panel(self, self.input_panel_ratio),
+            ui::shared::divider::view_divider(DividerType::InputResults, dragging_input_results),
+            ui::results_panel::view_results_panel(self, self.input_panel_ratio),
+        ];
 
         let main_content = column![
             header,

@@ -12,7 +12,10 @@ use crate::{App, Message};
 use super::{result_project_info, result_wood_beam};
 
 /// Render the results panel based on current selection and calculation state
-pub fn view_results_panel(app: &App) -> Element<'_, Message> {
+///
+/// The `input_ratio` parameter is the ratio used by the input panel.
+/// This panel uses the complementary ratio (1 - input_ratio).
+pub fn view_results_panel(app: &App, input_ratio: f32) -> Element<'_, Message> {
     let content: Column<'_, Message> = if let Some(ref error) = app.error_message {
         // Show error message
         column![
@@ -28,8 +31,11 @@ pub fn view_results_panel(app: &App) -> Element<'_, Message> {
         result_project_info::view(&app.project)
     };
 
+    // Use complementary ratio (scale to 0-100 for better precision)
+    let portion = ((1.0 - input_ratio) * 100.0) as u16;
+
     let panel = container(scrollable(content.padding(8)))
-        .width(Length::FillPortion(3))
+        .width(Length::FillPortion(portion))
         .style(container::bordered_box)
         .padding(5);
 
