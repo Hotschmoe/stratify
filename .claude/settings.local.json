@@ -42,7 +42,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(dir:*)",
       "Bash(bd close:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(cargo check:*)"
     ]
   }
 }
