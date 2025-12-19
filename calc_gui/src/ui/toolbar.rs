@@ -31,7 +31,7 @@ pub fn view_header_owned(window_title: String) -> Element<'static, Message> {
 }
 
 /// Render the toolbar with file operations and settings dropdown
-pub fn view_toolbar(dark_mode: bool, settings_menu_open: bool) -> Element<'static, Message> {
+pub fn view_toolbar(settings_menu_open: bool) -> Element<'static, Message> {
     let file_buttons = row![
         button(text("New").size(11))
             .on_press(Message::NewProject)
@@ -63,46 +63,38 @@ pub fn view_toolbar(dark_mode: bool, settings_menu_open: bool) -> Element<'stati
         .padding(Padding::from([4, 8]))
         .style(if settings_menu_open { button::primary } else { button::secondary });
 
-    // Settings dropdown menu (shown when open)
-    let settings_section: Element<'static, Message> = if settings_menu_open {
-        let theme_label = if dark_mode { "Light Mode" } else { "Dark Mode" };
-
-        let dropdown_content = column![
-            // Dark mode toggle
-            button(text(theme_label).size(10))
-                .on_press(Message::ToggleDarkMode)
-                .padding(Padding::from([4, 12]))
-                .width(Length::Fill)
-                .style(button::secondary),
-            // Check for updates (disabled/grayed out)
-            button(text("Check for Updates").size(10).color([0.5, 0.5, 0.5]))
-                .padding(Padding::from([4, 12]))
-                .width(Length::Fill)
-                .style(button::secondary),
-        ]
-        .spacing(2)
-        .width(Length::Fixed(130.0));
-
-        let dropdown = container(dropdown_content)
-            .padding(4)
-            .style(container::bordered_box);
-
-        column![
-            settings_button,
-            dropdown,
-        ]
-        .spacing(2)
-        .into()
-    } else {
-        settings_button.into()
-    };
-
     row![
         file_buttons,
         Space::new().width(Length::Fill),
-        settings_section,
+        settings_button,
     ]
     .padding(Padding::from([4, 0]))
-    .align_y(Alignment::Start)
+    .align_y(Alignment::Center)
     .into()
+}
+
+/// Render the settings dropdown menu
+pub fn view_settings_menu(dark_mode: bool) -> Element<'static, Message> {
+    let theme_label = if dark_mode { "Light Mode" } else { "Dark Mode" };
+
+    let dropdown_content = column![
+        // Dark mode toggle
+        button(text(theme_label).size(10))
+            .on_press(Message::ToggleDarkMode)
+            .padding(Padding::from([4, 12]))
+            .width(Length::Fill)
+            .style(button::secondary),
+        // Check for updates (disabled/grayed out)
+        button(text("Check for Updates").size(10).color([0.5, 0.5, 0.5]))
+            .padding(Padding::from([4, 12]))
+            .width(Length::Fill)
+            .style(button::secondary),
+    ]
+    .spacing(2)
+    .width(Length::Fixed(130.0));
+
+    container(dropdown_content)
+        .padding(4)
+        .style(container::bordered_box)
+        .into()
 }
