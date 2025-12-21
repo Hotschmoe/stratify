@@ -43,7 +43,8 @@
       "Bash(dir:*)",
       "Bash(bd close:*)",
       "Bash(git pull:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(bd:*)"
     ]
   }
 }
