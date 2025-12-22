@@ -1770,9 +1770,31 @@ impl App {
         {
             match render_project_pdf(&self.project) {
                 Ok(pdf_bytes) => {
-                    match std::fs::write(&path, pdf_bytes) {
-                        Ok(()) => self.status = format!("Exported to: {}", path.display()),
-                        Err(e) => self.status = format!("Failed to write PDF: {}", e),
+                    // Use atomic write: write to temp file, then rename
+                    // This prevents freezing when overwriting a file open in a PDF viewer
+                    let temp_path = path.with_extension("pdf.tmp");
+
+                    match std::fs::write(&temp_path, &pdf_bytes) {
+                        Ok(()) => {
+                            // Try to rename temp to final (atomic on same filesystem)
+                            match std::fs::rename(&temp_path, &path) {
+                                Ok(()) => {
+                                    self.status = format!("Exported to: {}", path.display());
+                                }
+                                Err(e) => {
+                                    // Rename failed (file likely locked by PDF viewer)
+                                    // Clean up temp file and report error
+                                    let _ = std::fs::remove_file(&temp_path);
+                                    self.status = format!(
+                                        "Cannot overwrite: file may be open in another program. Error: {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.status = format!("Failed to write PDF: {}", e);
+                        }
                     }
                 }
                 Err(e) => self.status = format!("PDF generation failed: {}", e),
