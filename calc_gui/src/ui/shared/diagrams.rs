@@ -102,6 +102,81 @@ impl BeamDiagram {
         Self { data }
     }
 
+    /// Draw vertical dashed lines at interior support positions (for multi-span beams)
+    fn draw_support_lines(
+        &self,
+        frame: &mut Frame,
+        x: f32,
+        width: f32,
+        top_y: f32,
+        bottom_y: f32,
+        color: Color,
+    ) {
+        if self.data.span_lengths_ft.len() <= 1 {
+            return; // Single span - no interior supports
+        }
+
+        let node_positions = self.data.node_positions_ft();
+        let total_length = self.data.total_length_ft;
+
+        // Draw vertical lines at interior supports (skip first and last)
+        for &node_ft in node_positions.iter().skip(1).take(node_positions.len() - 2) {
+            let node_x = x + (node_ft / total_length) as f32 * width;
+
+            // Draw dashed vertical line
+            let dash_length = 4.0;
+            let gap_length = 3.0;
+            let mut y = top_y;
+            while y < bottom_y {
+                let dash_end = (y + dash_length).min(bottom_y);
+                let dash = Path::line(
+                    Point::new(node_x, y),
+                    Point::new(node_x, dash_end),
+                );
+                frame.stroke(&dash, Stroke::default().with_color(color).with_width(1.0));
+                y += dash_length + gap_length;
+            }
+        }
+    }
+
+    /// Find extrema (max/min) values per span from diagram data
+    fn find_span_extrema(&self, diagram: &[(f64, f64)]) -> Vec<(f64, f64, f64, f64)> {
+        // Returns Vec of (span_start, span_end, max_value, min_value) per span
+        let node_positions = self.data.node_positions_ft();
+        let mut results = Vec::new();
+
+        for i in 0..self.data.span_lengths_ft.len() {
+            let span_start = node_positions[i];
+            let span_end = node_positions[i + 1];
+
+            let span_points: Vec<_> = diagram
+                .iter()
+                .filter(|(pos, _)| *pos >= span_start && *pos <= span_end)
+                .collect();
+
+            if span_points.is_empty() {
+                results.push((span_start, span_end, 0.0, 0.0));
+                continue;
+            }
+
+            let max_val = span_points.iter().map(|(_, v)| *v).fold(f64::NEG_INFINITY, f64::max);
+            let min_val = span_points.iter().map(|(_, v)| *v).fold(f64::INFINITY, f64::min);
+
+            results.push((span_start, span_end, max_val, min_val));
+        }
+
+        results
+    }
+
+    /// Find position of extrema value within a span
+    fn find_extrema_position(&self, diagram: &[(f64, f64)], span_start: f64, span_end: f64, target_value: f64) -> Option<f64> {
+        diagram
+            .iter()
+            .filter(|(pos, _)| *pos >= span_start && *pos <= span_end)
+            .find(|(_, v)| (*v - target_value).abs() < 1e-6)
+            .map(|(pos, _)| *pos)
+    }
+
     fn draw_beam_schematic(
         &self,
         frame: &mut Frame,
@@ -654,8 +729,73 @@ impl BeamDiagram {
                     }
                 });
                 frame.stroke(&shear_line, Stroke::default().with_color(color).with_width(2.0));
+
+                // Draw per-span max markers for multi-span beams
+                if self.data.span_lengths_ft.len() > 1 {
+                    let span_extrema = self.find_span_extrema(&self.data.shear_diagram);
+                    for (i, (span_start, span_end, max_val, min_val)) in span_extrema.iter().enumerate() {
+                        // Draw max shear marker
+                        if let Some(max_pos) = self.find_extrema_position(&self.data.shear_diagram, *span_start, *span_end, *max_val) {
+                            let px = x + (max_pos as f32 / self.data.total_length_ft as f32) * width;
+                            let v_norm = max_val / max_v;
+                            let py = center_y - (v_norm as f32) * plot_height;
+
+                            // Small circle at max point
+                            let marker = Path::circle(Point::new(px, py), 3.0);
+                            frame.fill(&marker, color);
+
+                            // Label (only show if significant and space permits)
+                            if max_val.abs() > max_v * 0.1 {
+                                let label = Text {
+                                    content: format!("{:.0}", max_val),
+                                    position: Point::new(px, py - 8.0),
+                                    color,
+                                    size: iced::Pixels(7.0),
+                                    align_x: iced::alignment::Horizontal::Center.into(),
+                                    ..Text::default()
+                                };
+                                frame.fill_text(label);
+                            }
+                        }
+
+                        // Draw min shear marker (if different from max)
+                        if (min_val - max_val).abs() > max_v * 0.1 {
+                            if let Some(min_pos) = self.find_extrema_position(&self.data.shear_diagram, *span_start, *span_end, *min_val) {
+                                let px = x + (min_pos as f32 / self.data.total_length_ft as f32) * width;
+                                let v_norm = min_val / max_v;
+                                let py = center_y - (v_norm as f32) * plot_height;
+
+                                let marker = Path::circle(Point::new(px, py), 3.0);
+                                frame.fill(&marker, color);
+
+                                if min_val.abs() > max_v * 0.1 {
+                                    let label = Text {
+                                        content: format!("{:.0}", min_val),
+                                        position: Point::new(px, py + 10.0),
+                                        color,
+                                        size: iced::Pixels(7.0),
+                                        align_x: iced::alignment::Horizontal::Center.into(),
+                                        ..Text::default()
+                                    };
+                                    frame.fill_text(label);
+                                }
+                            }
+                        }
+                        let _ = i; // Suppress unused warning
+                    }
+                }
             }
         }
+
+        // Draw support lines at interior supports (for multi-span)
+        self.draw_support_lines(
+            frame,
+            x,
+            width,
+            y + top_margin,
+            y + height - bottom_margin,
+            axis_color,
+        );
 
         // Labels - positioned within bounds
         let title = Text {
@@ -767,7 +907,67 @@ impl BeamDiagram {
                 }
             });
             frame.stroke(&outline, Stroke::default().with_color(color).with_width(2.0));
+
+            // Draw per-span max moment markers for multi-span beams
+            if self.data.span_lengths_ft.len() > 1 {
+                let span_extrema = self.find_span_extrema(&self.data.moment_diagram);
+                for (i, (span_start, span_end, span_max, span_min)) in span_extrema.iter().enumerate() {
+                    // Draw max positive moment marker (if significant)
+                    if *span_max > total_range * 0.05 {
+                        if let Some(max_pos) = self.find_extrema_position(&self.data.moment_diagram, *span_start, *span_end, *span_max) {
+                            let px = x + (max_pos as f32 / self.data.total_length_ft as f32) * width;
+                            let py = axis_y + (*span_max as f32) * scale;
+
+                            let marker = Path::circle(Point::new(px, py), 3.0);
+                            frame.fill(&marker, color);
+
+                            // Label for max moment
+                            let label = Text {
+                                content: format!("+{:.0}", span_max),
+                                position: Point::new(px, py + 10.0),
+                                color,
+                                size: iced::Pixels(7.0),
+                                align_x: iced::alignment::Horizontal::Center.into(),
+                                ..Text::default()
+                            };
+                            frame.fill_text(label);
+                        }
+                    }
+
+                    // Draw max negative moment marker at supports (if significant)
+                    if span_min.abs() > total_range * 0.05 {
+                        if let Some(min_pos) = self.find_extrema_position(&self.data.moment_diagram, *span_start, *span_end, *span_min) {
+                            let px = x + (min_pos as f32 / self.data.total_length_ft as f32) * width;
+                            let py = axis_y + (*span_min as f32) * scale;
+
+                            let marker = Path::circle(Point::new(px, py), 3.0);
+                            frame.fill(&marker, color);
+
+                            let label = Text {
+                                content: format!("{:.0}", span_min),
+                                position: Point::new(px, py - 8.0),
+                                color,
+                                size: iced::Pixels(7.0),
+                                align_x: iced::alignment::Horizontal::Center.into(),
+                                ..Text::default()
+                            };
+                            frame.fill_text(label);
+                        }
+                    }
+                    let _ = i; // Suppress unused warning
+                }
+            }
         }
+
+        // Draw support lines at interior supports (for multi-span)
+        self.draw_support_lines(
+            frame,
+            x,
+            width,
+            y + top_margin,
+            y + height - bottom_margin,
+            axis_color,
+        );
 
         // Labels - positioned within bounds
         let title = Text {
@@ -855,7 +1055,55 @@ impl BeamDiagram {
                 builder.close();
             });
             frame.fill(&fill_path, Color { a: 0.2, ..color });
+
+            // Draw per-span max deflection markers for multi-span beams
+            if self.data.span_lengths_ft.len() > 1 {
+                let span_extrema = self.find_span_extrema(&self.data.deflection_diagram);
+                for (i, (span_start, span_end, span_max, span_min)) in span_extrema.iter().enumerate() {
+                    // Find the extremum with largest absolute value in this span
+                    let (extremum, is_positive) = if span_max.abs() > span_min.abs() {
+                        (*span_max, true)
+                    } else {
+                        (*span_min, false)
+                    };
+
+                    // Only show if significant
+                    if extremum.abs() > scale * 0.05 {
+                        if let Some(ext_pos) = self.find_extrema_position(&self.data.deflection_diagram, *span_start, *span_end, extremum) {
+                            let px = x + (ext_pos as f32 / self.data.total_length_ft as f32) * width;
+                            let d_ratio = extremum / scale;
+                            let py = axis_y + (d_ratio as f32) * plot_height;
+
+                            let marker = Path::circle(Point::new(px, py), 3.0);
+                            frame.fill(&marker, color);
+
+                            // Label position: below for positive (downward), above for negative (upward)
+                            let label_y = if is_positive { py + 10.0 } else { py - 8.0 };
+                            let label = Text {
+                                content: format!("{:.3}\"", extremum),
+                                position: Point::new(px, label_y),
+                                color,
+                                size: iced::Pixels(7.0),
+                                align_x: iced::alignment::Horizontal::Center.into(),
+                                ..Text::default()
+                            };
+                            frame.fill_text(label);
+                        }
+                    }
+                    let _ = i; // Suppress unused warning
+                }
+            }
         }
+
+        // Draw support lines at interior supports (for multi-span)
+        self.draw_support_lines(
+            frame,
+            x,
+            width,
+            y + top_margin,
+            y + height - bottom_margin,
+            axis_color,
+        );
 
         // Labels - positioned within bounds
         let title = Text {
