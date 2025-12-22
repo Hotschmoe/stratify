@@ -16,7 +16,6 @@
 //! - "Structural Analysis" by R.C. Hibbeler, Chapter 11
 //! - "Moment Distribution" by Hardy Cross (1930)
 
-use crate::calculations::beam_analysis::SingleLoad;
 use crate::calculations::continuous_beam::{ContinuousBeamInput, SupportType};
 use crate::equations::beam::{fem_point_load, fem_uniform_full, fem_partial_uniform};
 use crate::loads::{LoadDistribution, LoadType};

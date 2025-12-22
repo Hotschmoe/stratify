@@ -846,9 +846,9 @@ pub fn calculate_continuous(
     input.validate()?;
 
     let combinations = method.combinations();
-    let n_spans = input.span_count();
+    let _n_spans = input.span_count();
     let n_nodes = input.node_count();
-    let node_positions = input.node_positions();
+    let _node_positions = input.node_positions();
 
     // Track governing results
     let mut governing_result: Option<ContinuousBeamResult> = None;
@@ -1105,7 +1105,8 @@ fn build_result_from_distribution(
                 span_max_pos_moment = m;
                 span_max_pos_moment_x = x;
             }
-            if defl > max_defl {
+            // Track maximum absolute deflection (handles negative from uplift)
+            if defl.abs() > max_defl.abs() {
                 max_defl = defl;
             }
         }
@@ -1123,7 +1124,8 @@ fn build_result_from_distribution(
             max_negative_moment = m_right.abs();
             max_negative_node = i + 1;
         }
-        if max_defl > max_deflection {
+        // Track global max deflection by absolute value
+        if max_defl.abs() > max_deflection.abs() {
             max_deflection = max_defl;
             max_deflection_loc = (i, l / 2.0);
         }
@@ -1181,9 +1183,9 @@ fn build_result_from_distribution(
         let allowable_fv = factors.adjusted_fv(props.fv_psi);
         let shear_unity = actual_fv / allowable_fv;
 
-        // Deflection check
+        // Deflection check (use absolute value for serviceability check)
         let deflection_limit = l_in / 240.0;
-        let deflection_unity = max_defl / deflection_limit;
+        let deflection_unity = max_defl.abs() / deflection_limit;
 
         // Track governing condition
         let span_governing = bending_unity.max(shear_unity).max(deflection_unity);
@@ -1433,5 +1435,147 @@ mod tests {
         assert_eq!(parsed.label, beam.label);
         assert_eq!(parsed.span_count(), beam.span_count());
         assert_eq!(parsed.supports.len(), beam.supports.len());
+    }
+
+    #[test]
+    fn test_wind_point_load_on_span2() {
+        // Bug repro: Wind point load on span 2+ should produce valid diagrams
+        // Two-span beam: 10' + 10', wind point load at 15' (middle of span 2)
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("Wind Point on Span 2")
+            .with_load(DiscreteLoad::point(LoadType::Wind, 1000.0, 15.0));
+
+        let input = ContinuousBeamInput {
+            label: "Two-span wind test".to_string(),
+            spans: vec![
+                SpanSegment::new(10.0, 1.5, 9.25, test_material()),
+                SpanSegment::new(10.0, 1.5, 9.25, test_material()),
+            ],
+            supports: vec![
+                SupportType::Pinned,
+                SupportType::Pinned,
+                SupportType::Pinned,
+            ],
+            load_case,
+            ..Default::default()
+        };
+
+        let result = calculate_continuous(&input, DesignMethod::Asd).expect("Calculation should succeed");
+
+        // Check reactions are reasonable
+        println!("Governing combo: {}", result.governing_combination);
+        println!("Reactions: {:?}", result.reactions);
+        println!("Max shear: {}", result.max_shear_lb);
+        println!("Max moment: {}", result.max_positive_moment_ftlb);
+        println!("Max deflection: {}", result.max_deflection_in);
+
+        // The total reactions should equal the applied load
+        let total_reaction: f64 = result.reactions.iter().sum();
+        println!("Total reaction: {} (expected ~1000 lb with factors)", total_reaction);
+
+        // Check deflection diagram values
+        println!("\nSpan 1 deflections (first 5):");
+        for (pos, d) in result.deflection_diagram.iter().take(5) {
+            println!("  pos={:.2}, defl={:.6}", pos, d);
+        }
+
+        println!("\nSpan 2 deflections (positions >= 10):");
+        let span2_deflections: Vec<_> = result.deflection_diagram.iter()
+            .filter(|(pos, _)| *pos >= 10.0)
+            .take(10)
+            .collect();
+        for (pos, d) in &span2_deflections {
+            println!("  pos={:.2}, defl={:.6}", pos, d);
+        }
+
+        // Check for max absolute deflection
+        let max_abs_defl = result.deflection_diagram.iter()
+            .map(|(_, d)| d.abs())
+            .fold(0.0f64, |a, b| a.max(b));
+        println!("\nMax absolute deflection: {}", max_abs_defl);
+
+        // Check shear diagram has reasonable values (not NaN, not extreme)
+        for (pos, v) in &result.shear_diagram {
+            assert!(!v.is_nan(), "Shear diagram has NaN at position {}", pos);
+            assert!(v.abs() < 10000.0, "Shear {} at pos {} seems too large", v, pos);
+        }
+
+        // Check moment diagram has reasonable values
+        for (pos, m) in &result.moment_diagram {
+            assert!(!m.is_nan(), "Moment diagram has NaN at position {}", pos);
+            assert!(m.abs() < 100000.0, "Moment {} at pos {} seems too large", m, pos);
+        }
+
+        // Check deflection diagram has reasonable values (not NaN, not extreme)
+        for (pos, d) in &result.deflection_diagram {
+            assert!(!d.is_nan(), "Deflection diagram has NaN at position {}", pos);
+            assert!(d.abs() < 100.0, "Deflection {} at pos {} seems too large", d, pos);
+        }
+
+        // Maximum absolute deflection should be non-zero
+        assert!(max_abs_defl > 0.0, "Should have non-zero deflection magnitude");
+    }
+
+    #[test]
+    fn test_dead_plus_wind_point_load_on_span2() {
+        // More realistic case: dead load + wind point load on span 2
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("D + W Point on Span 2")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 50.0))  // 50 plf dead
+            .with_load(DiscreteLoad::point(LoadType::Wind, 1000.0, 15.0));  // 1000 lb wind at 15'
+
+        let input = ContinuousBeamInput {
+            label: "Two-span D+W test".to_string(),
+            spans: vec![
+                SpanSegment::new(10.0, 1.5, 9.25, test_material()),
+                SpanSegment::new(10.0, 1.5, 9.25, test_material()),
+            ],
+            supports: vec![
+                SupportType::Pinned,
+                SupportType::Pinned,
+                SupportType::Pinned,
+            ],
+            load_case,
+            ..Default::default()
+        };
+
+        let result = calculate_continuous(&input, DesignMethod::Asd).expect("Calculation should succeed");
+
+        println!("Governing combo: {}", result.governing_combination);
+        println!("Reactions: {:?}", result.reactions);
+        println!("Max shear: {}", result.max_shear_lb);
+        println!("Max moment: {}", result.max_positive_moment_ftlb);
+        println!("Max deflection: {}", result.max_deflection_in);
+
+        // Print span 2 deflection sample
+        println!("\nSpan 2 deflections (positions >= 10):");
+        let span2_deflections: Vec<_> = result.deflection_diagram.iter()
+            .filter(|(pos, _)| *pos >= 10.0)
+            .take(10)
+            .collect();
+        for (pos, d) in &span2_deflections {
+            println!("  pos={:.2}, defl={:.6}", pos, d);
+        }
+
+        // Total reactions should be positive (dead load > wind uplift in most combos)
+        let total_reaction: f64 = result.reactions.iter().sum();
+        println!("\nTotal reaction: {}", total_reaction);
+
+        // Check for max absolute deflection
+        let max_abs_defl = result.deflection_diagram.iter()
+            .map(|(_, d)| d.abs())
+            .fold(0.0f64, |a, b| a.max(b));
+        println!("Max absolute deflection: {}", max_abs_defl);
+
+        // Deflections should be reasonable
+        for (pos, d) in &result.deflection_diagram {
+            assert!(!d.is_nan(), "Deflection diagram has NaN at position {}", pos);
+        }
+
+        assert!(max_abs_defl > 0.0, "Should have non-zero deflection");
     }
 }

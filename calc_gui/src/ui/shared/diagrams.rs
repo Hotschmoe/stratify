@@ -821,20 +821,21 @@ impl BeamDiagram {
         frame.stroke(&axis, Stroke::default().with_color(axis_color).with_width(1.0));
 
         // Draw deflection using pre-computed points
+        // Use absolute max for scale so positive=down, negative=up renders correctly
         if !self.data.deflection_diagram.is_empty() && self.data.max_deflection_in.abs() > 1e-9 {
-            let max_d = self.data.max_deflection_in;
+            let scale = self.data.max_deflection_in.abs();
 
-            // Draw curve
+            // Draw curve (positive deflection = downward = below axis)
             let defl_path = Path::new(|builder| {
                 let first = &self.data.deflection_diagram[0];
                 let px = x + (first.0 as f32 / self.data.total_length_ft as f32) * width;
-                let d_ratio = first.1 / max_d;
+                let d_ratio = first.1 / scale;
                 let py = axis_y + (d_ratio as f32) * plot_height;
                 builder.move_to(Point::new(px, py));
 
                 for (pos, d) in &self.data.deflection_diagram {
                     let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
-                    let d_ratio = d / max_d;
+                    let d_ratio = d / scale;
                     let py = axis_y + (d_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
                 }
@@ -846,7 +847,7 @@ impl BeamDiagram {
                 builder.move_to(Point::new(x, axis_y));
                 for (pos, d) in &self.data.deflection_diagram {
                     let px = x + (*pos as f32 / self.data.total_length_ft as f32) * width;
-                    let d_ratio = d / max_d;
+                    let d_ratio = d / scale;
                     let py = axis_y + (d_ratio as f32) * plot_height;
                     builder.line_to(Point::new(px, py));
                 }
@@ -867,7 +868,7 @@ impl BeamDiagram {
         frame.fill_text(title);
 
         let max_label = Text {
-            content: format!("Max: {:.3} in", self.data.max_deflection_in),
+            content: format!("Max: {:.3} in", self.data.max_deflection_in.abs()),
             position: Point::new(x + 85.0, y + 3.0),  // Next to title
             color,
             size: iced::Pixels(9.0),
