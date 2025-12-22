@@ -823,7 +823,7 @@ impl Equation {
                 variables: vec![
                     Variable::new("delta", "Actual deflection", "in"),
                     Variable::new("L", "Span length", "in"),
-                    Variable::new("limit", "Deflection ratio (240, 360, etc.)", "-"),
+                    Variable::new("n", "Deflection ratio (240, 360, etc.)", "-"),
                 ],
                 assumptions: vec!["IBC Table 1604.3 limits", "Floor/roof specific limits"],
                 category: EquationCategory::DesignChecks,
