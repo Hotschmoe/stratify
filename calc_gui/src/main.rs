@@ -16,6 +16,7 @@ use calc_core::calculations::continuous_beam::{
     calculate_continuous, ContinuousBeamInput, ContinuousBeamResult, SpanSegment, SupportType,
 };
 use calc_core::calculations::CalculationItem;
+#[cfg(not(target_arch = "wasm32"))]
 use calc_core::file_io::{load_project, save_project, FileLock};
 use calc_core::loads::{DesignMethod, DiscreteLoad, EnhancedLoadCase, LoadDistribution, LoadType};
 use calc_core::materials::{
@@ -26,6 +27,7 @@ use calc_core::nds_factors::{
     AdjustmentFactors, FlatUse, Incising, LoadDuration, RepetitiveMember, Temperature, WetService,
 };
 use calc_core::section_deductions::{NotchLocation, SectionDeductions};
+#[cfg(not(target_arch = "wasm32"))]
 use calc_core::pdf::render_project_pdf;
 use calc_core::project::Project;
 
@@ -392,6 +394,7 @@ pub struct App {
 
     // File management
     pub current_file: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub file_lock: Option<FileLock>,
     pub is_modified: bool,
     pub lock_holder: Option<String>,
@@ -503,6 +506,7 @@ impl Default for App {
         App {
             project: Project::new("Engineer", "25-001", "Client"),
             current_file: None,
+            #[cfg(not(target_arch = "wasm32"))]
             file_lock: None,
             is_modified: false,
             lock_holder: None,
@@ -1198,7 +1202,10 @@ impl App {
     }
 
     fn do_new_project(&mut self) {
-        self.file_lock = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.file_lock = None;
+        }
         self.project = Project::new("Engineer", "25-001", "Client");
         self.current_file = None;
         self.is_modified = false;
@@ -1285,6 +1292,7 @@ impl App {
         self.status = "File open not available in browser. Use drag-and-drop.".to_string();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_project(&mut self) {
         if !self.can_edit() {
             self.status = "Cannot save: file is read-only".to_string();
@@ -1296,6 +1304,11 @@ impl App {
         } else {
             self.save_project_as();
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_project(&mut self) {
+        self.status = "File save not available in browser.".to_string();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1330,6 +1343,7 @@ impl App {
         self.status = "File save not available in browser.".to_string();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn do_save(&mut self, path: PathBuf) {
         self.project.meta.modified = chrono::Utc::now();
 
