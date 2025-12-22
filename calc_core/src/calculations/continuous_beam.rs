@@ -1081,6 +1081,25 @@ fn build_result_from_distribution(
                                 let centroid = local_start + active_len / 2.0;
                                 m -= load_force * (x - centroid);
                             }
+                            // Add deflection using numerical integration
+                            // Treat partial load as multiple point loads
+                            let num_segments = 20;
+                            let seg_len = (local_end - local_start) / num_segments as f64;
+                            let seg_load = magnitude * seg_len; // lbs per segment
+                            for seg in 0..num_segments {
+                                let seg_pos = local_start + seg_len * (seg as f64 + 0.5);
+                                let a_in = seg_pos * 12.0;
+                                let b_in = l_in - a_in;
+                                if x_in <= a_in {
+                                    // x before load point
+                                    defl += seg_load * b_in * x_in * (l_in * l_in - b_in * b_in - x_in * x_in)
+                                        / (6.0 * ei * l_in);
+                                } else {
+                                    // x after load point
+                                    defl += seg_load * a_in * (l_in - x_in) * (2.0 * l_in * x_in - x_in * x_in - a_in * a_in)
+                                        / (6.0 * ei * l_in);
+                                }
+                            }
                         }
                     }
                     _ => {}
@@ -1577,5 +1596,219 @@ mod tests {
         }
 
         assert!(max_abs_defl > 0.0, "Should have non-zero deflection");
+    }
+
+    #[test]
+    fn test_partial_uniform_load_alone() {
+        // Verify partial uniform load calculates correctly
+        // 12 ft beam with 100 plf load from 3 ft to 9 ft (6 ft loaded length)
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("Partial Dead")
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Dead, 100.0, 3.0, 9.0))
+            .without_self_weight();
+
+        let input = ContinuousBeamInput::simple_span(
+            "Partial Uniform Test",
+            12.0,
+            1.5,
+            9.25,
+            test_material(),
+            load_case,
+        );
+
+        let result = calculate_continuous(&input, DesignMethod::Asd)
+            .expect("Calculation should succeed");
+
+        // Total load = 100 plf * 6 ft = 600 lb
+        // Centroid at 6 ft (symmetric about midspan)
+        // R1 = R2 = 300 lb each
+        let total_reaction: f64 = result.reactions.iter().sum();
+        assert!(
+            (total_reaction - 600.0).abs() < 1.0,
+            "Total reaction {} should be ~600 lb", total_reaction
+        );
+
+        // Reactions should be equal for symmetric load
+        assert!(
+            (result.reactions[0] - result.reactions[1]).abs() < 1.0,
+            "Reactions should be equal for symmetric partial load"
+        );
+
+        // Check diagrams have valid values
+        for (pos, v) in &result.shear_diagram {
+            assert!(!v.is_nan(), "Shear NaN at pos {}", pos);
+        }
+        for (pos, m) in &result.moment_diagram {
+            assert!(!m.is_nan(), "Moment NaN at pos {}", pos);
+        }
+        for (pos, d) in &result.deflection_diagram {
+            assert!(!d.is_nan(), "Deflection NaN at pos {}", pos);
+        }
+
+        // Max moment should be positive (load applied)
+        assert!(result.max_positive_moment_ftlb > 0.0, "Should have positive moment");
+
+        // Check deflection diagram has non-zero values
+        let max_abs_defl = result.deflection_diagram.iter()
+            .map(|(_, d)| d.abs())
+            .fold(0.0f64, f64::max);
+        assert!(max_abs_defl > 0.0, "Should have non-zero deflection");
+    }
+
+    #[test]
+    fn test_partial_uniform_plus_full_uniform() {
+        // Partial uniform (dead) + full uniform (live)
+        // 12 ft beam with:
+        // - 50 plf dead from 0-6 ft (partial)
+        // - 40 plf live over full span
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("D partial + L full")
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Dead, 50.0, 0.0, 6.0))
+            .with_load(DiscreteLoad::uniform(LoadType::Live, 40.0))
+            .without_self_weight();
+
+        let input = ContinuousBeamInput::simple_span(
+            "Partial + Full Test",
+            12.0,
+            1.5,
+            9.25,
+            test_material(),
+            load_case,
+        );
+
+        let result = calculate_continuous(&input, DesignMethod::Asd)
+            .expect("Calculation should succeed");
+
+        // Partial dead: 50 plf * 6 ft = 300 lb
+        // Full live: 40 plf * 12 ft = 480 lb
+        // Total = 780 lb (for D+L combination)
+        let total_reaction: f64 = result.reactions.iter().sum();
+        assert!(
+            (total_reaction - 780.0).abs() < 1.0,
+            "Total reaction {} should be ~780 lb for D+L", total_reaction
+        );
+
+        // Reactions should NOT be equal (asymmetric loading)
+        assert!(
+            (result.reactions[0] - result.reactions[1]).abs() > 10.0,
+            "Reactions should differ for asymmetric load"
+        );
+
+        // Check diagrams are valid
+        for (pos, v) in &result.shear_diagram {
+            assert!(!v.is_nan(), "Shear NaN at pos {}", pos);
+        }
+        for (pos, m) in &result.moment_diagram {
+            assert!(!m.is_nan(), "Moment NaN at pos {}", pos);
+        }
+    }
+
+    #[test]
+    fn test_partial_uniform_plus_point_load() {
+        // Partial uniform + point load
+        // 12 ft beam with:
+        // - 60 plf dead from 2-8 ft (partial, centroid at 5 ft)
+        // - 500 lb live point load at midspan (6 ft)
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("D partial + L point")
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Dead, 60.0, 2.0, 8.0))
+            .with_load(DiscreteLoad::point(LoadType::Live, 500.0, 6.0))
+            .without_self_weight();
+
+        let input = ContinuousBeamInput::simple_span(
+            "Partial + Point Test",
+            12.0,
+            1.5,
+            9.25,
+            test_material(),
+            load_case,
+        );
+
+        let result = calculate_continuous(&input, DesignMethod::Asd)
+            .expect("Calculation should succeed");
+
+        // Partial dead: 60 plf * 6 ft = 360 lb (centroid at 5 ft)
+        // Point live: 500 lb at 6 ft
+        // Total for D+L = 860 lb
+        let total_reaction: f64 = result.reactions.iter().sum();
+        assert!(
+            (total_reaction - 860.0).abs() < 1.0,
+            "Total reaction {} should be ~860 lb for D+L", total_reaction
+        );
+
+        // Reactions should sum correctly
+        // - Partial load centroid at 5 ft: R1 gets more
+        // - Point load at 6 ft (midspan): equal contribution
+        // Both reactions should be positive and reasonable
+        assert!(result.reactions[0] > 0.0, "Left reaction should be positive");
+        assert!(result.reactions[1] > 0.0, "Right reaction should be positive");
+
+        // Verify max moment occurs near midspan
+        let (_, pos) = result.max_positive_moment_location;
+        assert!(
+            (pos - 6.0).abs() < 2.0,
+            "Max moment at {} should be near midspan (6 ft)", pos
+        );
+    }
+
+    #[test]
+    fn test_multiple_partial_uniform_loads() {
+        // Multiple partial uniform loads at different locations
+        // 12 ft beam with:
+        // - 50 plf dead from 0-4 ft
+        // - 80 plf live from 4-8 ft
+        // - 30 plf snow from 8-12 ft
+        use super::calculate_continuous;
+        use crate::loads::DesignMethod;
+
+        let load_case = EnhancedLoadCase::new("Multiple partials")
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Dead, 50.0, 0.0, 4.0))
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Live, 80.0, 4.0, 8.0))
+            .with_load(DiscreteLoad::partial_uniform(LoadType::Snow, 30.0, 8.0, 12.0))
+            .without_self_weight();
+
+        let input = ContinuousBeamInput::simple_span(
+            "Multiple Partials Test",
+            12.0,
+            1.5,
+            9.25,
+            test_material(),
+            load_case,
+        );
+
+        let result = calculate_continuous(&input, DesignMethod::Asd)
+            .expect("Calculation should succeed");
+
+        // Dead: 50 * 4 = 200 lb
+        // Live: 80 * 4 = 320 lb
+        // Snow: 30 * 4 = 120 lb
+        // D + L combination = 200 + 320 = 520 lb
+        // D + S combination = 200 + 120 = 320 lb
+        // The governing combo should have the highest factored load
+        let total_reaction: f64 = result.reactions.iter().sum();
+
+        // Should be D + L = 520 lb (higher than D + S)
+        assert!(
+            total_reaction > 300.0 && total_reaction < 700.0,
+            "Total reaction {} should be reasonable", total_reaction
+        );
+
+        // All diagrams should be valid
+        for (pos, v) in &result.shear_diagram {
+            assert!(!v.is_nan(), "Shear NaN at pos {}", pos);
+        }
+        for (pos, m) in &result.moment_diagram {
+            assert!(!m.is_nan(), "Moment NaN at pos {}", pos);
+            assert!(m.abs() < 10000.0, "Moment {} at pos {} seems too large", m, pos);
+        }
+        for (pos, d) in &result.deflection_diagram {
+            assert!(!d.is_nan(), "Deflection NaN at pos {}", pos);
+        }
     }
 }
