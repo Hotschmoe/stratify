@@ -165,7 +165,8 @@ impl CategoryGroup {
         }
     }
 
-    /// Check if group has any categories
+    /// Check if group has any categories (for future filtering)
+    #[allow(dead_code)]
     pub fn has_categories(&self) -> bool {
         !self.categories().is_empty()
     }
