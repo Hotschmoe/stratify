@@ -1605,8 +1605,17 @@ impl App {
             beam.adjustment_factors = adjustment_factors;
             beam
         } else {
-            let mut beam = ContinuousBeamInput::simple_span(
-                self.beam_label.clone(), span_ft, width_in, depth_in, material, load_case,
+            // Single-span mode: use span_ft for length, but respect support type selections
+            let left_support = self.span_table.first()
+                .map(|s| s.left_support)
+                .unwrap_or(SupportType::Pinned);
+            let right_support = self.right_end_support;
+            let span = SpanSegment::new(span_ft, width_in, depth_in, material);
+            let mut beam = ContinuousBeamInput::new(
+                self.beam_label.clone(),
+                vec![span],
+                vec![left_support, right_support],
+                load_case,
             );
             beam.adjustment_factors = adjustment_factors;
             beam
@@ -1728,8 +1737,17 @@ impl App {
             input.adjustment_factors = adjustment_factors;
             input
         } else {
-            let mut input = ContinuousBeamInput::simple_span(
-                self.beam_label.clone(), span_ft, width_in, depth_in, material, load_case,
+            // Single-span mode: use span_ft for length, but respect support type selections
+            let left_support = self.span_table.first()
+                .map(|s| s.left_support)
+                .unwrap_or(SupportType::Pinned);
+            let right_support = self.right_end_support;
+            let span = SpanSegment::new(span_ft, width_in, depth_in, material);
+            let mut input = ContinuousBeamInput::new(
+                self.beam_label.clone(),
+                vec![span],
+                vec![left_support, right_support],
+                load_case,
             );
             input.adjustment_factors = adjustment_factors;
             input
