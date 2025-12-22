@@ -368,6 +368,39 @@ trunk build --release
 3. **Auditability**: Every change should be traceable. Git integration enables full audit trails.
 4. **Performance**: GPU acceleration where beneficial, but never at the cost of correctness.
 5. **Minimal Dependencies**: Use industry-standard libraries. Avoid "magic" frameworks that hide complexity.
+6. **Readable Code**: The codebase is organized for engineers to navigate and audit the underlying mathematics.
+
+### Engineering Auditability
+
+Stratify is designed for **transparency and auditability**. Engineers using this software should be able to verify every calculation themselves. Unlike proprietary "black-box" software, the codebase is:
+
+- **Readable and Navigable**: The repository is organized so engineers can easily find and audit the equations and mathematics used in their designs. Clear module structure, consistent naming conventions, and comprehensive documentation make the codebase accessible to engineers who want to verify the underlying formulas.
+
+- **Visible in Source**: Every calculation has its formula documented in the source code with ASCII diagrams showing force/moment conventions
+- **Referenced to Standards**: Each equation cites its source (NDS 2018 Table 4A, Roark's Table 8.1, ASCE 7-22, etc.)
+- **Organized by Domain**: Equations live in `calc_core/src/equations/` with clear module organization:
+  ```
+  equations/
+  ├── mod.rs       # Sign conventions and module docs
+  ├── beam.rs      # Simply-supported, fixed, cantilever formulas
+  ├── section.rs   # Cross-section properties
+  └── registry.rs  # Equation metadata and PDF appendix generation
+  ```
+- **Tested Against Known Values**: 185+ unit tests verify equations against textbook examples and hand calculations
+- **Traceable to PDF Output**: Generated PDF reports include a "List of Equations" appendix showing every formula used, its code reference, and which members apply it
+
+**For engineers auditing this software**: Start with `calc_core/src/equations/beam.rs` to see the core formulas. Each function includes the mathematical formula, sign convention diagram, and reference citation. The test files (run `cargo test -- --nocapture`) demonstrate expected inputs and outputs.
+
+**Repository Navigation Guide**:
+| What You Want to Find | Where to Look |
+|----------------------|---------------|
+| Beam formulas (moment, shear, deflection) | `calc_core/src/equations/beam.rs` |
+| Section properties (I, S, A) | `calc_core/src/equations/section.rs` |
+| Equation metadata and references | `calc_core/src/equations/registry.rs` |
+| NDS adjustment factors (C_D, C_M, etc.) | `calc_core/src/nds_factors.rs` |
+| Load combinations (ASCE 7) | `calc_core/src/loads.rs` |
+| Material properties | `calc_core/src/materials.rs` |
+| PDF generation | `calc_core/src/pdf.rs` |
 
 ### Code Organization
 

@@ -10,6 +10,7 @@
 //!
 //! - [`beam`] - Simply-supported beam formulas (moment, shear, deflection)
 //! - [`section`] - Cross-section properties (S, I, A)
+//! - [`registry`] - Equation metadata and tracking for PDF appendix generation
 //!
 //! ## Sign Conventions
 //!
@@ -27,6 +28,7 @@
 //! - ASCE 7-22: Minimum Design Loads for Buildings
 
 pub mod beam;
+pub mod registry;
 pub mod section;
 
 // Re-export commonly used items
@@ -79,4 +81,17 @@ pub use section::{
     rectangular_radius_of_gyration,
     rectangular_shear_area,
     nominal_to_actual_dimensions,
+};
+
+pub use registry::{
+    CodeReference,
+    Equation,
+    EquationCategory,
+    EquationMetadata,
+    EquationTracker,
+    EquationUsage,
+    Variable,
+    ALL_EQUATIONS,
+    beam_calculation_equations,
+    generate_static_equations_appendix_typst,
 };

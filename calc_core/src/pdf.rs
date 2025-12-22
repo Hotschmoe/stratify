@@ -46,6 +46,7 @@ use typst_pdf::PdfOptions;
 
 use crate::calculations::continuous_beam::{calculate_continuous, ContinuousBeamInput, ContinuousBeamResult};
 use crate::calculations::CalculationItem;
+use crate::equations::registry::{beam_calculation_equations, EquationTracker};
 use crate::errors::{CalcError, CalcResult};
 use crate::project::Project;
 
@@ -767,6 +768,22 @@ $ delta_"max" = {deflection_in} "in" $
             governing = &result.governing_condition,
         ));
     }
+
+    // Build equation tracker for the appendix
+    let mut equation_tracker = EquationTracker::new();
+    for (input, _result) in &beams {
+        // Record the standard beam calculation equations for each beam
+        for equation in beam_calculation_equations() {
+            equation_tracker.record_for_member(
+                equation,
+                "Beam analysis",
+                input.label.clone(),
+            );
+        }
+    }
+
+    // Add the equations appendix
+    source.push_str(&equation_tracker.generate_appendix_typst());
 
     // Compile the Typst document
     let world = PdfWorld::new(source);
