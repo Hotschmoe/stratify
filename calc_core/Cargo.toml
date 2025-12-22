@@ -6,6 +6,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "gen-equations"
+path = "src/bin/gen_equations.rs"
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

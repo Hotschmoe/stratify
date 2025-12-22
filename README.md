@@ -389,11 +389,12 @@ Stratify is designed for **transparency and auditability**. Engineers using this
 - **Tested Against Known Values**: 185+ unit tests verify equations against textbook examples and hand calculations
 - **Traceable to PDF Output**: Generated PDF reports include a "List of Equations" appendix showing every formula used, its code reference, and which members apply it
 
-**For engineers auditing this software**: Start with `calc_core/src/equations/beam.rs` to see the core formulas. Each function includes the mathematical formula, sign convention diagram, and reference citation. The test files (run `cargo test -- --nocapture`) demonstrate expected inputs and outputs.
+**For engineers auditing this software**: Start with [`calc_core/src/equations/EQUATIONS.md`](calc_core/src/equations/EQUATIONS.md) for a complete index of all mathematical formulas. This auto-generated reference lists every equation with its formula, code reference, and source location. For implementation details, see `calc_core/src/equations/beam.rs` where each function includes ASCII sign convention diagrams. Run `cargo test -- --nocapture` to see test output with expected values.
 
 **Repository Navigation Guide**:
 | What You Want to Find | Where to Look |
 |----------------------|---------------|
+| **All equations (quick reference)** | [`calc_core/src/equations/EQUATIONS.md`](calc_core/src/equations/EQUATIONS.md) |
 | Beam formulas (moment, shear, deflection) | `calc_core/src/equations/beam.rs` |
 | Section properties (I, S, A) | `calc_core/src/equations/section.rs` |
 | Equation metadata and references | `calc_core/src/equations/registry.rs` |

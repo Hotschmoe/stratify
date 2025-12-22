@@ -93,5 +93,6 @@ pub use registry::{
     Variable,
     ALL_EQUATIONS,
     beam_calculation_equations,
+    generate_equations_markdown,
     generate_static_equations_appendix_typst,
 };
