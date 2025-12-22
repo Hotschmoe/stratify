@@ -443,7 +443,7 @@ impl Equation {
                 formula_typst: r#"$M_("max") = w L^2 / 8$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2a" },
                 variables: vec![
-                    Variable::new("M_max", "Maximum moment", "ft-lb"),
+                    Variable::new("M_(\"max\")", "Maximum moment", "ft-lb"),
                     Variable::new("w", "Uniform load", "plf"),
                     Variable::new("L", "Span length", "ft"),
                 ],
@@ -471,7 +471,7 @@ impl Equation {
                 formula_typst: r#"$delta_("max") = (5 w L^4) / (384 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2a" },
                 variables: vec![
-                    Variable::new("delta_max", "Maximum deflection", "in"),
+                    Variable::new("delta_(\"max\")", "Maximum deflection", "in"),
                     Variable::new("w", "Uniform load", "lb/in"),
                     Variable::new("L", "Span length", "in"),
                     Variable::new("E", "Modulus of elasticity", "psi"),
@@ -583,7 +583,7 @@ impl Equation {
                 formula_typst: r#"$M_("max") = w L^2 / 24$ (sagging at midspan)"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2e" },
                 variables: vec![
-                    Variable::new("M_max", "Maximum positive moment", "ft-lb"),
+                    Variable::new("M_(\"max\")", "Maximum positive moment", "ft-lb"),
                 ],
                 assumptions: vec!["Both ends fully fixed", "Occurs at midspan"],
                 category: EquationCategory::InternalForces,
@@ -595,7 +595,7 @@ impl Equation {
                 formula_typst: r#"$delta_("max") = w L^4 / (384 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2e" },
                 variables: vec![
-                    Variable::new("delta_max", "Maximum deflection", "in"),
+                    Variable::new("delta_(\"max\")", "Maximum deflection", "in"),
                 ],
                 assumptions: vec!["Both ends fully fixed", "1/5 of simply-supported deflection"],
                 category: EquationCategory::Deflections,
@@ -621,7 +621,7 @@ impl Equation {
                 formula_typst: r#"$delta_("max") = w L^4 / (8 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2b" },
                 variables: vec![
-                    Variable::new("delta_max", "Maximum deflection at free end", "in"),
+                    Variable::new("delta_(\"max\")", "Maximum deflection at free end", "in"),
                 ],
                 assumptions: vec!["Fixed at one end", "Deflection at free end"],
                 category: EquationCategory::Deflections,
@@ -662,7 +662,7 @@ impl Equation {
                 formula_typst: r#"$M_("max") = 9 w L^2 / 128$ at $x = 3L / 8$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2c" },
                 variables: vec![
-                    Variable::new("M_max", "Maximum positive moment", "ft-lb"),
+                    Variable::new("M_(\"max\")", "Maximum positive moment", "ft-lb"),
                 ],
                 assumptions: vec!["Fixed-pinned supports", "Occurs at 3L/8 from fixed end"],
                 category: EquationCategory::InternalForces,
@@ -755,7 +755,7 @@ impl Equation {
                     Variable::new("C_t", "Temperature factor", "-"),
                     Variable::new("C_L", "Beam stability factor", "-"),
                     Variable::new("C_F", "Size factor", "-"),
-                    Variable::new("C_fu", "Flat use factor", "-"),
+                    Variable::new("C_(\"fu\")", "Flat use factor", "-"),
                     Variable::new("C_i", "Incising factor", "-"),
                     Variable::new("C_r", "Repetitive member factor", "-"),
                 ],
