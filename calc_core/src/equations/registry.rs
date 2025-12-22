@@ -372,7 +372,7 @@ impl Equation {
             Equation::PointLoadMoment => EquationMetadata {
                 name: "Point Load Moment",
                 description: "Bending moment at position x for concentrated load",
-                formula_typst: r#"$M(x) = R_1 x$ for $x <= a$, $M_"max" = P a (L - a) / L$"#,
+                formula_typst: r#"$M(x) = R_1 x$ for $x <= a$, $M_("max") = P a (L - a) / L$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "1a" },
                 variables: vec![
                     Variable::new("M", "Bending moment", "ft-lb"),
@@ -440,7 +440,7 @@ impl Equation {
             Equation::UniformLoadMaxMoment => EquationMetadata {
                 name: "Maximum Moment for Uniform Load",
                 description: "Maximum bending moment at midspan for uniform load",
-                formula_typst: r#"$M_"max" = w L^2 / 8$"#,
+                formula_typst: r#"$M_("max") = w L^2 / 8$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2a" },
                 variables: vec![
                     Variable::new("M_max", "Maximum moment", "ft-lb"),
@@ -468,7 +468,7 @@ impl Equation {
             Equation::UniformLoadMaxDeflection => EquationMetadata {
                 name: "Maximum Deflection for Uniform Load",
                 description: "Maximum deflection at midspan for uniform load",
-                formula_typst: r#"$delta_"max" = (5 w L^4) / (384 E I)$"#,
+                formula_typst: r#"$delta_("max") = (5 w L^4) / (384 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2a" },
                 variables: vec![
                     Variable::new("delta_max", "Maximum deflection", "in"),
@@ -580,7 +580,7 @@ impl Equation {
             Equation::FixedFixedUniformMaxPositiveMoment => EquationMetadata {
                 name: "Fixed-Fixed Max Positive Moment",
                 description: "Maximum positive moment at midspan for fixed-fixed beam",
-                formula_typst: r#"$M_"max" = w L^2 / 24$ (sagging at midspan)"#,
+                formula_typst: r#"$M_("max") = w L^2 / 24$ (sagging at midspan)"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2e" },
                 variables: vec![
                     Variable::new("M_max", "Maximum positive moment", "ft-lb"),
@@ -592,7 +592,7 @@ impl Equation {
             Equation::FixedFixedUniformMaxDeflection => EquationMetadata {
                 name: "Fixed-Fixed Max Deflection",
                 description: "Maximum deflection at midspan for fixed-fixed beam with uniform load",
-                formula_typst: r#"$delta_"max" = w L^4 / (384 E I)$"#,
+                formula_typst: r#"$delta_("max") = w L^4 / (384 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2e" },
                 variables: vec![
                     Variable::new("delta_max", "Maximum deflection", "in"),
@@ -618,7 +618,7 @@ impl Equation {
             Equation::CantileverUniformMaxDeflection => EquationMetadata {
                 name: "Cantilever Uniform Load Max Deflection",
                 description: "Maximum deflection at free end for cantilever with uniform load",
-                formula_typst: r#"$delta_"max" = w L^4 / (8 E I)$"#,
+                formula_typst: r#"$delta_("max") = w L^4 / (8 E I)$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2b" },
                 variables: vec![
                     Variable::new("delta_max", "Maximum deflection at free end", "in"),
@@ -659,7 +659,7 @@ impl Equation {
             Equation::FixedPinnedUniformMaxPositiveMoment => EquationMetadata {
                 name: "Propped Cantilever Max Positive Moment",
                 description: "Maximum positive moment for propped cantilever with uniform load",
-                formula_typst: r#"$M_"max" = 9 w L^2 / 128$ at $x = 3L / 8$"#,
+                formula_typst: r#"$M_("max") = 9 w L^2 / 128$ at $x = 3L / 8$"#,
                 reference: CodeReference::Roarks { edition: 8, table: "Table 8.1", case: "2c" },
                 variables: vec![
                     Variable::new("M_max", "Maximum positive moment", "ft-lb"),
@@ -745,7 +745,7 @@ impl Equation {
             Equation::NDSAdjustedBendingStrength => EquationMetadata {
                 name: "NDS Adjusted Bending Strength",
                 description: "Reference bending design value multiplied by all adjustment factors",
-                formula_typst: r#"$F'_b = F_b C_D C_M C_t C_L C_F C_"fu" C_i C_r$"#,
+                formula_typst: r#"$F'_b = F_b dot C_D dot C_M dot C_t dot C_L dot C_F dot C_("fu") dot C_i dot C_r$"#,
                 reference: CodeReference::NDS { year: 2018, section: "4.3" },
                 variables: vec![
                     Variable::new("F'_b", "Adjusted bending design value", "psi"),
@@ -818,7 +818,7 @@ impl Equation {
             Equation::DeflectionLimit => EquationMetadata {
                 name: "Deflection Limit",
                 description: "Serviceability check for maximum deflection",
-                formula_typst: r#"$delta <= L / "limit"$ (typical: L/240 live, L/180 total)"#,
+                formula_typst: r#"$delta <= L \/ n$ where $n$ = 240, 360, etc."#,
                 reference: CodeReference::ASCE7 { year: 2022, section: "Table 1604.3" },
                 variables: vec![
                     Variable::new("delta", "Actual deflection", "in"),
