@@ -1194,6 +1194,20 @@ impl App {
                                     self.file_lock = None;
                                 }
                                 self.project = project;
+
+                                // Enable categories for items that exist in the loaded project
+                                self.enabled_categories.clear();
+                                for item in self.project.items.values() {
+                                    match item {
+                                        CalculationItem::Beam(_) => {
+                                            self.enabled_categories.insert(ItemCategory::WoodBeams);
+                                        }
+                                        CalculationItem::Column(_) => {
+                                            // WoodColumns category not yet implemented
+                                        }
+                                    }
+                                }
+
                                 // Store the file name (on both native and WASM we only get the name)
                                 self.current_file = Some(PathBuf::from(&file_name));
                                 self.is_modified = false;
