@@ -350,35 +350,45 @@ impl MomentDistribution {
             return true;
         }
 
-        // First, release moments at exterior pinned supports (they can't resist moment)
+        // First, release moments at exterior supports that can't resist moment
+        // (Pinned, Roller, and Free all have zero moment at the end)
         // Left exterior joint
         let left_joint = &self.joints[0];
-        if left_joint.support_type == SupportType::Pinned
-            || left_joint.support_type == SupportType::Roller
-        {
+        let left_cant_resist = matches!(
+            left_joint.support_type,
+            SupportType::Pinned | SupportType::Roller | SupportType::Free
+        );
+        if left_cant_resist {
             // Left exterior is connected to span 0's left end
             if !left_joint.connected_spans.is_empty() {
                 let span_idx = left_joint.connected_spans[0];
                 let release = -self.spans[span_idx].moment_left;
                 self.spans[span_idx].moment_left = 0.0;
-                // Carry over to the other end of this span
-                self.spans[span_idx].moment_right += release * 0.5;
+                // Carry over to the other end of this span (only for Pinned/Roller, not Free)
+                // Free ends don't transfer moment through carryover
+                if left_joint.support_type != SupportType::Free {
+                    self.spans[span_idx].moment_right += release * 0.5;
+                }
             }
         }
 
         // Right exterior joint
         let n_joints = self.joints.len();
         let right_joint = &self.joints[n_joints - 1];
-        if right_joint.support_type == SupportType::Pinned
-            || right_joint.support_type == SupportType::Roller
-        {
+        let right_cant_resist = matches!(
+            right_joint.support_type,
+            SupportType::Pinned | SupportType::Roller | SupportType::Free
+        );
+        if right_cant_resist {
             // Right exterior is connected to last span's right end
             if !right_joint.connected_spans.is_empty() {
                 let span_idx = right_joint.connected_spans[0];
                 let release = -self.spans[span_idx].moment_right;
                 self.spans[span_idx].moment_right = 0.0;
-                // Carry over to the other end of this span
-                self.spans[span_idx].moment_left += release * 0.5;
+                // Carry over to the other end of this span (only for Pinned/Roller, not Free)
+                if right_joint.support_type != SupportType::Free {
+                    self.spans[span_idx].moment_left += release * 0.5;
+                }
             }
         }
 
@@ -439,10 +449,11 @@ impl MomentDistribution {
 
                     let carryover = if far_support == SupportType::Fixed {
                         0.5 // Fixed far end - full carryover
-                    } else if far_support == SupportType::Pinned
-                        || far_support == SupportType::Roller
-                    {
-                        0.0 // Pinned far end - no carryover
+                    } else if matches!(
+                        far_support,
+                        SupportType::Pinned | SupportType::Roller | SupportType::Free
+                    ) {
+                        0.0 // Pinned/Roller/Free far end - no carryover (can't resist moment)
                     } else {
                         0.5 // Continuous - full carryover
                     };
@@ -694,6 +705,127 @@ mod tests {
             approx_eq(right_moment, 833.33, 50.0),
             "Right moment = {} (expected ~833.33)",
             right_moment
+        );
+    }
+
+    #[test]
+    fn test_two_span_fixed_left_exterior() {
+        // Bug repro: Two-span beam with Fixed left exterior should produce non-zero results
+        // [Fixed, Pinned, Pinned]
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 100.0));
+
+        let input = ContinuousBeamInput {
+            label: "Fixed-Pin-Pin".to_string(),
+            spans: vec![
+                super::super::continuous_beam::SpanSegment::new(
+                    10.0,
+                    1.5,
+                    9.25,
+                    test_material(),
+                ),
+                super::super::continuous_beam::SpanSegment::new(
+                    10.0,
+                    1.5,
+                    9.25,
+                    test_material(),
+                ),
+            ],
+            supports: vec![
+                SupportType::Fixed,
+                SupportType::Pinned,
+                SupportType::Pinned,
+            ],
+            load_case,
+            ..Default::default()
+        };
+
+        let load_factors = vec![(LoadType::Dead, 1.0)];
+        let result = analyze_moment_distribution(&input, &load_factors);
+
+        assert!(result.converged, "Should converge");
+
+        // Left end (Fixed) should have non-zero moment
+        assert!(
+            result.span_moments_left[0].abs() > 100.0,
+            "Fixed left end should have significant moment, got {}",
+            result.span_moments_left[0]
+        );
+
+        // Right end of span 2 (Pinned) should have ~zero moment
+        assert!(
+            result.span_moments_right[1].abs() < 50.0,
+            "Pinned right end should have ~0 moment, got {}",
+            result.span_moments_right[1]
+        );
+
+        // Interior support should have non-zero moment
+        assert!(
+            result.support_moments[1].abs() > 100.0,
+            "Interior support should have significant moment, got {}",
+            result.support_moments[1]
+        );
+    }
+
+    #[test]
+    fn test_two_span_free_left_exterior() {
+        // Bug repro: Two-span beam with Free left exterior (cantilever + continuation)
+        // [Free, Pinned, Pinned] - This is an unusual configuration but should not produce zeros
+        // Note: This requires at least 2 vertical supports for stability
+        let load_case = EnhancedLoadCase::new("Test")
+            .with_load(DiscreteLoad::uniform(LoadType::Dead, 100.0));
+
+        let input = ContinuousBeamInput {
+            label: "Free-Pin-Pin".to_string(),
+            spans: vec![
+                super::super::continuous_beam::SpanSegment::new(
+                    10.0,
+                    1.5,
+                    9.25,
+                    test_material(),
+                ),
+                super::super::continuous_beam::SpanSegment::new(
+                    10.0,
+                    1.5,
+                    9.25,
+                    test_material(),
+                ),
+            ],
+            supports: vec![
+                SupportType::Free,
+                SupportType::Pinned,
+                SupportType::Pinned,
+            ],
+            load_case,
+            ..Default::default()
+        };
+
+        let load_factors = vec![(LoadType::Dead, 1.0)];
+        let result = analyze_moment_distribution(&input, &load_factors);
+
+        assert!(result.converged, "Should converge");
+
+        // Free left end should have zero moment (can't resist moment)
+        assert!(
+            result.span_moments_left[0].abs() < 10.0,
+            "Free left end should have ~0 moment, got {}",
+            result.span_moments_left[0]
+        );
+
+        // Right end of span 2 (Pinned) should have ~zero moment
+        assert!(
+            result.span_moments_right[1].abs() < 50.0,
+            "Pinned right end should have ~0 moment, got {}",
+            result.span_moments_right[1]
+        );
+
+        // Interior support should have non-zero moment (from cantilever effect)
+        // For a uniform load on a cantilever portion, M = wL²/2 at the support
+        // Span 1 has 100 plf * 10 ft overhang, M = 100 * 10² / 2 = 5000 ft-lb
+        assert!(
+            result.support_moments[1].abs() > 1000.0,
+            "Interior support should have significant moment from cantilever, got {}",
+            result.support_moments[1]
         );
     }
 }
