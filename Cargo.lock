@@ -503,11 +503,14 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "iced",
+ "js-sys",
  "rfd",
  "serde",
  "serde_json",
  "uuid",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "whoami",
 ]
 

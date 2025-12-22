@@ -29,3 +29,15 @@ iced = { version = "0.14", default-features = false, features = ["wgpu", "canvas
 # WASM-only dependencies - for better error reporting
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+# web-sys for browser download functionality
+web-sys = { version = "0.3", features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Document",
+    "Element",
+    "HtmlAnchorElement",
+    "Url",
+    "Window",
+] }
+js-sys = "0.3"
