@@ -32,6 +32,52 @@
 
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// NDS Code Section References
+// ============================================================================
+
+/// NDS code section references for beam design checks and adjustment factors.
+///
+/// These constants provide traceable references to the National Design
+/// Specification for Wood Construction (NDS 2018).
+pub mod nds_ref {
+    // Design checks
+    /// Bending design value check
+    pub const BENDING: &str = "NDS 3.3.1";
+    /// Shear design value check
+    pub const SHEAR: &str = "NDS 3.4.3";
+    /// Deflection limits
+    pub const DEFLECTION: &str = "NDS 3.2.2";
+
+    // Adjustment factors
+    /// Load duration factor C_D
+    pub const C_D: &str = "NDS 2.3.2";
+    /// Wet service factor C_M
+    pub const C_M: &str = "NDS 4.3.3";
+    /// Temperature factor C_t
+    pub const C_T: &str = "NDS 2.3.3";
+    /// Beam stability factor C_L
+    pub const C_L: &str = "NDS 3.3.3";
+    /// Size factor C_F
+    pub const C_F: &str = "NDS Table 4A";
+    /// Flat use factor C_fu
+    pub const C_FU: &str = "NDS 4.3.7";
+    /// Incising factor C_i
+    pub const C_I: &str = "NDS 4.3.8";
+    /// Repetitive member factor C_r
+    pub const C_R: &str = "NDS 4.3.9";
+    /// Modulus of elasticity adjustment
+    pub const E_ADJUSTMENT: &str = "NDS 5.4.2";
+
+    // Formulas
+    /// Adjusted bending design value formula
+    pub const FB_FORMULA: &str = "NDS 3.3.1";
+    /// Adjusted shear design value formula
+    pub const FV_FORMULA: &str = "NDS 3.4.3";
+    /// Shear stress formula for rectangular sections
+    pub const SHEAR_STRESS_FORMULA: &str = "NDS 3.4.3";
+}
+
 /// Load duration factor (C_D) per NDS Table 2.3.2
 ///
 /// Accounts for the cumulative effect of load duration on wood strength.
@@ -830,37 +876,37 @@ impl AdjustmentSummary {
     /// Format as a multi-line string for reports
     pub fn format_report(&self) -> String {
         format!(
-            "NDS Adjustment Factors ({}\" × {}\")\n\
-             ══════════════════════════════════════\n\
-             C_D  (Load Duration)    = {:.2}\n\
-             C_M  (Wet Service - Fb) = {:.2}\n\
-             C_M  (Wet Service - Fv) = {:.2}\n\
-             C_M  (Wet Service - E)  = {:.2}\n\
-             C_t  (Temperature)      = {:.2}\n\
-             C_L  (Beam Stability)   = {:.3}\n\
-             C_F  (Size)             = {:.2}\n\
-             C_fu (Flat Use)         = {:.2}\n\
-             C_i  (Incising)         = {:.2}\n\
-             C_r  (Repetitive)       = {:.2}\n\
-             ──────────────────────────────────────\n\
-             Net Fb factor           = {:.3}\n\
-             Net Fv factor           = {:.3}\n\
-             Net E factor            = {:.3}",
+            "NDS Adjustment Factors ({}\" x {}\")\n\
+             ================================================\n\
+             C_D  (Load Duration)    = {:.2}    {}\n\
+             C_M  (Wet Service - Fb) = {:.2}    {}\n\
+             C_M  (Wet Service - Fv) = {:.2}    {}\n\
+             C_M  (Wet Service - E)  = {:.2}    {}\n\
+             C_t  (Temperature)      = {:.2}    {}\n\
+             C_L  (Beam Stability)   = {:.3}   {}\n\
+             C_F  (Size)             = {:.2}    {}\n\
+             C_fu (Flat Use)         = {:.2}    {}\n\
+             C_i  (Incising)         = {:.2}    {}\n\
+             C_r  (Repetitive)       = {:.2}    {}\n\
+             ------------------------------------------------\n\
+             Net Fb factor           = {:.3}   {}\n\
+             Net Fv factor           = {:.3}   {}\n\
+             Net E factor            = {:.3}   {}",
             self.width_in,
             self.depth_in,
-            self.c_d,
-            self.c_m_fb,
-            self.c_m_fv,
-            self.c_m_e,
-            self.c_t,
-            self.c_l,
-            self.c_f,
-            self.c_fu,
-            self.c_i_strength,
-            self.c_r,
-            self.net_fb_factor,
-            self.net_fv_factor,
-            self.net_e_factor,
+            self.c_d, nds_ref::C_D,
+            self.c_m_fb, nds_ref::C_M,
+            self.c_m_fv, nds_ref::C_M,
+            self.c_m_e, nds_ref::C_M,
+            self.c_t, nds_ref::C_T,
+            self.c_l, nds_ref::C_L,
+            self.c_f, nds_ref::C_F,
+            self.c_fu, nds_ref::C_FU,
+            self.c_i_strength, nds_ref::C_I,
+            self.c_r, nds_ref::C_R,
+            self.net_fb_factor, nds_ref::FB_FORMULA,
+            self.net_fv_factor, nds_ref::FV_FORMULA,
+            self.net_e_factor, nds_ref::E_ADJUSTMENT,
         )
     }
 }

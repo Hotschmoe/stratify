@@ -8,6 +8,7 @@ use iced::widget::{button, column, rule, text, Canvas, Column, Row, Space};
 use iced::{Element, Length, Padding};
 
 use calc_core::calculations::continuous_beam::{ContinuousBeamInput, ContinuousBeamResult};
+use calc_core::nds_factors::nds_ref;
 
 use crate::{Message, ResultsTab};
 use super::shared::diagrams::{BeamDiagram, BeamDiagramData};
@@ -148,16 +149,16 @@ fn view_calculation_results<'a>(input: &'a ContinuousBeamInput, result: &'a Cont
         Space::new().height(12),
         text("Capacity Checks").size(12),
         text(format!(
-            "Bending: {:.0}/{:.0} psi = {:.2} [{}]",
-            actual_fb, allowable_fb, bending_unity, bending_status
+            "Bending: {:.0}/{:.0} psi = {:.2} [{}] ({})",
+            actual_fb, allowable_fb, bending_unity, bending_status, nds_ref::BENDING
         )).size(11),
         text(format!(
-            "Shear: {:.0}/{:.0} psi = {:.2} [{}]",
-            actual_fv, allowable_fv, shear_unity, shear_status
+            "Shear: {:.0}/{:.0} psi = {:.2} [{}] ({})",
+            actual_fv, allowable_fv, shear_unity, shear_status, nds_ref::SHEAR
         )).size(11),
         text(format!(
-            "Deflection: {:.2} [{}]",
-            defl_unity, defl_status
+            "Deflection: {:.2} [{}] ({})",
+            defl_unity, defl_status, nds_ref::DEFLECTION
         )).size(11),
         Space::new().height(12),
         text("Section Properties").size(12),

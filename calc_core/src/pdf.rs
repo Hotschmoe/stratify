@@ -48,6 +48,7 @@ use crate::calculations::continuous_beam::{calculate_continuous, ContinuousBeamI
 use crate::calculations::CalculationItem;
 use crate::equations::registry::{beam_calculation_equations, EquationTracker};
 use crate::errors::{CalcError, CalcResult};
+use crate::nds_factors::nds_ref;
 use crate::project::Project;
 
 // ============================================================================
@@ -284,14 +285,14 @@ $ delta_"max" = (5 w L^4) / (384 E I) = {{DEFLECTION_IN}} "in" $
 === Stress Checks
 
 #table(
-  columns: (1fr, auto, auto, auto, auto),
+  columns: (1fr, auto, auto, auto, auto, auto),
   inset: 8pt,
   stroke: 0.5pt,
-  align: (left, right, right, right, center),
-  table.header([*Check*], [*Actual*], [*Allowable*], [*Unity*], [*Status*]),
-  [Bending], [{{FB_ACTUAL}} psi], [{{FB_ALLOW}} psi], [{{BENDING_UNITY}}], [{{BENDING_STATUS}}],
-  [Shear], [{{FV_ACTUAL}} psi], [{{FV_ALLOW}} psi], [{{SHEAR_UNITY}}], [{{SHEAR_STATUS}}],
-  [Deflection], [L/{{DEFL_RATIO}}], [L/{{DEFL_LIMIT}}], [{{DEFL_UNITY}}], [{{DEFL_STATUS}}],
+  align: (left, right, right, right, center, left),
+  table.header([*Check*], [*Actual*], [*Allowable*], [*Unity*], [*Status*], [*NDS Ref*]),
+  [Bending], [{{FB_ACTUAL}} psi], [{{FB_ALLOW}} psi], [{{BENDING_UNITY}}], [{{BENDING_STATUS}}], [{{NDS_BENDING}}],
+  [Shear], [{{FV_ACTUAL}} psi], [{{FV_ALLOW}} psi], [{{SHEAR_UNITY}}], [{{SHEAR_STATUS}}], [{{NDS_SHEAR}}],
+  [Deflection], [L/{{DEFL_RATIO}}], [L/{{DEFL_LIMIT}}], [{{DEFL_UNITY}}], [{{DEFL_STATUS}}], [{{NDS_DEFLECTION}}],
 )
 
 #v(16pt)
@@ -442,6 +443,9 @@ pub fn render_beam_pdf(
             "{{DEFL_STATUS}}",
             if span_result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
         )
+        .replace("{{NDS_BENDING}}", nds_ref::BENDING)
+        .replace("{{NDS_SHEAR}}", nds_ref::SHEAR)
+        .replace("{{NDS_DEFLECTION}}", nds_ref::DEFLECTION)
         .replace(
             "{{OVERALL_PASS}}",
             if result.passes() { "PASS" } else { "FAIL" },
@@ -702,14 +706,14 @@ $ delta_"max" = {deflection_in} "in" $
 === Stress Checks
 
 #table(
-  columns: (1fr, auto, auto, auto, auto),
+  columns: (1fr, auto, auto, auto, auto, auto),
   inset: 8pt,
   stroke: 0.5pt,
-  align: (left, right, right, right, center),
-  table.header([*Check*], [*Actual*], [*Allowable*], [*Unity*], [*Status*]),
-  [Bending], [{fb_actual} psi], [{fb_allow} psi], [{bending_unity}], [{bending_status}],
-  [Shear], [{fv_actual} psi], [{fv_allow} psi], [{shear_unity}], [{shear_status}],
-  [Deflection], [L/{defl_ratio}], [L/{defl_limit}], [{defl_unity}], [{defl_status}],
+  align: (left, right, right, right, center, left),
+  table.header([*Check*], [*Actual*], [*Allowable*], [*Unity*], [*Status*], [*NDS Ref*]),
+  [Bending], [{fb_actual} psi], [{fb_allow} psi], [{bending_unity}], [{bending_status}], [{nds_bending}],
+  [Shear], [{fv_actual} psi], [{fv_allow} psi], [{shear_unity}], [{shear_status}], [{nds_shear}],
+  [Deflection], [L/{defl_ratio}], [L/{defl_limit}], [{defl_unity}], [{defl_status}], [{nds_deflection}],
 )
 
 #v(16pt)
@@ -755,6 +759,9 @@ $ delta_"max" = {deflection_in} "in" $
             defl_limit = format!("{:.0}", 240.0),
             defl_unity = format!("{:.2}", span_result.deflection_unity),
             defl_status = if span_result.deflection_unity <= 1.0 { "OK" } else { "FAIL" },
+            nds_bending = nds_ref::BENDING,
+            nds_shear = nds_ref::SHEAR,
+            nds_deflection = nds_ref::DEFLECTION,
             status_color = if result.passes() {
                 "rgb(\"#d4edda\")"
             } else {
