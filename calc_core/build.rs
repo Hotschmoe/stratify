@@ -224,7 +224,7 @@ fn process_sawn_lumber(data_dir: &Path) -> Option<String> {
 }
 
 // ============================================================================
-// Engineered Wood Processing
+// Engineered Wood Processing (LVL, PSL, LSL)
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
@@ -247,6 +247,7 @@ struct EngineeredMetadata {
 
 #[derive(Debug, Deserialize)]
 struct EngineeredProduct {
+    #[allow(dead_code)]
     name: String,
     code: String,
     #[serde(rename = "Fb")]
@@ -269,28 +270,92 @@ struct EngineeredProduct {
     depth_factor_exponent: Option<f64>,  // For depth adjustment: (12/d)^exp
 }
 
+// ============================================================================
+// Glulam Processing (separate schema with Fb_pos/Fb_neg)
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+struct GlulamFile {
+    metadata: GlulamMetadata,
+    #[serde(default)]
+    products: Vec<GlulamProduct>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlulamMetadata {
+    source: String,
+    #[allow(dead_code)]
+    product_type: String,  // Should be "Glulam"
+    #[allow(dead_code)]
+    transcribed_date: Option<String>,
+    #[allow(dead_code)]
+    verified_against: Option<String>,
+    #[allow(dead_code)]
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlulamProduct {
+    #[allow(dead_code)]
+    name: String,
+    code: String,
+    #[serde(rename = "Fb_pos")]
+    fb_pos_psi: f64,
+    #[serde(rename = "Fb_neg")]
+    fb_neg_psi: f64,
+    #[serde(rename = "Ft")]
+    ft_psi: f64,
+    #[serde(rename = "Fv")]
+    fv_psi: f64,
+    #[serde(rename = "Fc_perp")]
+    fc_perp_psi: f64,
+    #[serde(rename = "Fc")]
+    fc_psi: f64,
+    #[serde(rename = "E")]
+    e_psi: f64,
+    #[serde(rename = "Emin")]
+    e_min_psi: f64,
+    #[serde(rename = "SG")]
+    specific_gravity: f64,
+    #[serde(default)]
+    is_balanced: bool,
+}
+
 fn process_engineered_wood(data_dir: &Path) -> Option<String> {
     let eng_dir = data_dir.join("engineered");
     if !eng_dir.exists() {
         return None;
     }
 
-    let mut all_data: HashMap<String, Vec<(EngineeredMetadata, Vec<EngineeredProduct>)>> = HashMap::new();
+    let mut lvl_psl_data: HashMap<String, Vec<(EngineeredMetadata, Vec<EngineeredProduct>)>> = HashMap::new();
+    let mut glulam_data: Vec<(GlulamMetadata, Vec<GlulamProduct>)> = Vec::new();
 
-    // Process all TOML files in engineered directory (including manufacturer subdirectory)
-    fn process_dir(dir: &Path, all_data: &mut HashMap<String, Vec<(EngineeredMetadata, Vec<EngineeredProduct>)>>) {
+    // Process all TOML files in engineered directory
+    fn process_dir(
+        dir: &Path,
+        lvl_psl_data: &mut HashMap<String, Vec<(EngineeredMetadata, Vec<EngineeredProduct>)>>,
+        glulam_data: &mut Vec<(GlulamMetadata, Vec<GlulamProduct>)>,
+    ) {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    process_dir(&path, all_data);
+                    process_dir(&path, lvl_psl_data, glulam_data);
                 } else if path.extension().map_or(false, |e| e == "toml") {
                     println!("cargo:rerun-if-changed={}", path.display());
                     if let Ok(content) = fs::read_to_string(&path) {
+                        // Try parsing as Glulam first (has Fb_pos/Fb_neg)
+                        if let Ok(data) = toml::from_str::<GlulamFile>(&content) {
+                            if data.metadata.product_type == "Glulam" {
+                                glulam_data.push((data.metadata, data.products));
+                                continue;
+                            }
+                        }
+                        // Otherwise try as LVL/PSL/LSL
                         match toml::from_str::<EngineeredWoodFile>(&content) {
                             Ok(data) => {
                                 let product_type = data.metadata.product_type.clone();
-                                all_data.entry(product_type)
+                                lvl_psl_data.entry(product_type)
                                     .or_default()
                                     .push((data.metadata, data.products));
                             }
@@ -304,9 +369,9 @@ fn process_engineered_wood(data_dir: &Path) -> Option<String> {
         }
     }
 
-    process_dir(&eng_dir, &mut all_data);
+    process_dir(&eng_dir, &mut lvl_psl_data, &mut glulam_data);
 
-    if all_data.is_empty() {
+    if lvl_psl_data.is_empty() && glulam_data.is_empty() {
         return None;
     }
 
@@ -318,6 +383,7 @@ fn process_engineered_wood(data_dir: &Path) -> Option<String> {
     code.push_str("    use std::collections::HashMap;\n");
     code.push_str("    use once_cell::sync::Lazy;\n\n");
 
+    // EngineeredWoodProps for LVL/PSL/LSL
     code.push_str("    #[derive(Debug, Clone, Copy)]\n");
     code.push_str("    pub struct EngineeredWoodProps {\n");
     code.push_str("        pub fb_psi: f64,\n");
@@ -331,8 +397,22 @@ fn process_engineered_wood(data_dir: &Path) -> Option<String> {
     code.push_str("        pub depth_factor_exponent: Option<f64>,\n");
     code.push_str("    }\n\n");
 
-    // Generate static data for each product type
-    for (product_type, data_list) in &all_data {
+    // GlulamProps with Fb_pos and Fb_neg
+    code.push_str("    #[derive(Debug, Clone, Copy)]\n");
+    code.push_str("    pub struct GlulamProps {\n");
+    code.push_str("        pub fb_pos_psi: f64,\n");
+    code.push_str("        pub fb_neg_psi: f64,\n");
+    code.push_str("        pub ft_psi: f64,\n");
+    code.push_str("        pub fv_psi: f64,\n");
+    code.push_str("        pub fc_perp_psi: f64,\n");
+    code.push_str("        pub fc_psi: f64,\n");
+    code.push_str("        pub e_psi: f64,\n");
+    code.push_str("        pub e_min_psi: f64,\n");
+    code.push_str("        pub specific_gravity: f64,\n");
+    code.push_str("    }\n\n");
+
+    // Generate static data for LVL/PSL/LSL
+    for (product_type, data_list) in &lvl_psl_data {
         let var_name = product_type.to_uppercase();
         code.push_str(&format!("    pub static {}: Lazy<HashMap<&'static str, EngineeredWoodProps>> = Lazy::new(|| {{\n", var_name));
         code.push_str("        let mut m = HashMap::new();\n");
@@ -363,6 +443,47 @@ fn process_engineered_wood(data_dir: &Path) -> Option<String> {
         code.push_str("        m\n");
         code.push_str("    });\n\n");
     }
+
+    // Generate static data for Glulam
+    if !glulam_data.is_empty() {
+        code.push_str("    pub static GLULAM: Lazy<HashMap<&'static str, GlulamProps>> = Lazy::new(|| {\n");
+        code.push_str("        let mut m = HashMap::new();\n");
+
+        for (meta, products) in &glulam_data {
+            code.push_str(&format!("        // Source: {}\n", meta.source));
+
+            for product in products {
+                code.push_str(&format!("        m.insert(\"{}\", GlulamProps {{\n", product.code));
+                code.push_str(&format!("            fb_pos_psi: {:.1},\n", product.fb_pos_psi));
+                code.push_str(&format!("            fb_neg_psi: {:.1},\n", product.fb_neg_psi));
+                code.push_str(&format!("            ft_psi: {:.1},\n", product.ft_psi));
+                code.push_str(&format!("            fv_psi: {:.1},\n", product.fv_psi));
+                code.push_str(&format!("            fc_perp_psi: {:.1},\n", product.fc_perp_psi));
+                code.push_str(&format!("            fc_psi: {:.1},\n", product.fc_psi));
+                code.push_str(&format!("            e_psi: {:.1},\n", product.e_psi));
+                code.push_str(&format!("            e_min_psi: {:.1},\n", product.e_min_psi));
+                code.push_str(&format!("            specific_gravity: {:.2},\n", product.specific_gravity));
+                code.push_str("        });\n");
+            }
+        }
+
+        code.push_str("        m\n");
+        code.push_str("    });\n\n");
+
+        // Add lookup helper for Glulam
+        code.push_str("    pub fn lookup_glulam(stress_class: &str) -> Option<GlulamProps> {\n");
+        code.push_str("        GLULAM.get(stress_class).copied()\n");
+        code.push_str("    }\n\n");
+    }
+
+    // Add lookup helpers for LVL/PSL
+    code.push_str("    pub fn lookup_lvl(grade: &str) -> Option<EngineeredWoodProps> {\n");
+    code.push_str("        LVL.get(grade).copied()\n");
+    code.push_str("    }\n\n");
+
+    code.push_str("    pub fn lookup_psl(grade: &str) -> Option<EngineeredWoodProps> {\n");
+    code.push_str("        PSL.get(grade).copied()\n");
+    code.push_str("    }\n");
 
     code.push_str("}\n");
 

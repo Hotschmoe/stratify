@@ -2,10 +2,14 @@
 //!
 //! Reference design values for visually graded dimension lumber.
 //! All values are for 2"-4" thick members (2x10 and wider).
+//!
+//! Base grade values (SS, No1, No2, No3) are loaded from TOML at compile time.
+//! Derived grades (Stud, Construction, Standard, Utility) are computed from base grades.
 
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{CalcError, CalcResult};
+use crate::generated::sawn_lumber_data;
 use crate::units::Psi;
 
 /// Wood species groups per NDS
@@ -38,6 +42,17 @@ impl WoodSpecies {
         WoodSpecies::SprucePineFir,
         WoodSpecies::DouglasFirSouth,
     ];
+
+    /// Get the code string for TOML lookup (e.g., "DF-L", "SP")
+    pub fn code(&self) -> &'static str {
+        match self {
+            WoodSpecies::DouglasFirLarch => "DF-L",
+            WoodSpecies::SouthernPine => "SP",
+            WoodSpecies::HemFir => "HF",
+            WoodSpecies::SprucePineFir => "SPF",
+            WoodSpecies::DouglasFirSouth => "DF-S",
+        }
+    }
 
     /// Parse from common string representations
     pub fn from_str_flexible(s: &str) -> CalcResult<Self> {
@@ -107,6 +122,22 @@ impl WoodGrade {
         WoodGrade::Utility,
     ];
 
+    /// Get the code string for TOML lookup (e.g., "SS", "No1")
+    /// Returns None for derived grades (Stud, Construction, Standard, Utility)
+    pub fn code(&self) -> Option<&'static str> {
+        match self {
+            WoodGrade::SelectStructural => Some("SS"),
+            WoodGrade::No1 => Some("No1"),
+            WoodGrade::No2 => Some("No2"),
+            WoodGrade::No3 => Some("No3"),
+            // Derived grades are computed from base grades, not stored in TOML
+            WoodGrade::Stud
+            | WoodGrade::Construction
+            | WoodGrade::Standard
+            | WoodGrade::Utility => None,
+        }
+    }
+
     /// Parse from common string representations
     pub fn from_str_flexible(s: &str) -> CalcResult<Self> {
         match s.to_uppercase().replace([' ', '.', '#'], "").as_str() {
@@ -174,6 +205,9 @@ pub struct WoodProperties {
 impl WoodProperties {
     /// Look up wood properties by species and grade.
     ///
+    /// Base grades (SS, No1, No2, No3) are loaded from TOML data compiled at build time.
+    /// Derived grades (Stud, Construction, Standard, Utility) are computed from base grades.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -183,261 +217,29 @@ impl WoodProperties {
     /// assert!(props.fb_psi > 0.0);
     /// ```
     pub fn lookup(species: WoodSpecies, grade: WoodGrade) -> Self {
-        // NDS 2018 Table 4A - Visually Graded Dimension Lumber (2" - 4" thick)
-        // Values for 2x10 and wider
-        match (species, grade) {
-            // Douglas Fir-Larch
-            (WoodSpecies::DouglasFirLarch, WoodGrade::SelectStructural) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1500.0,
-                ft_psi: 1000.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 625.0,
-                fc_psi: 1700.0,
-                e_psi: 1_900_000.0,
-                e_min_psi: 690_000.0,
-                specific_gravity: 0.50,
-            },
-            (WoodSpecies::DouglasFirLarch, WoodGrade::No1) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1200.0,
-                ft_psi: 800.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 625.0,
-                fc_psi: 1550.0,
-                e_psi: 1_700_000.0,
-                e_min_psi: 620_000.0,
-                specific_gravity: 0.50,
-            },
-            (WoodSpecies::DouglasFirLarch, WoodGrade::No2) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 900.0,
-                ft_psi: 575.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 625.0,
-                fc_psi: 1350.0,
-                e_psi: 1_600_000.0,
-                e_min_psi: 580_000.0,
-                specific_gravity: 0.50,
-            },
-            (WoodSpecies::DouglasFirLarch, WoodGrade::No3) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 525.0,
-                ft_psi: 325.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 625.0,
-                fc_psi: 775.0,
-                e_psi: 1_400_000.0,
-                e_min_psi: 510_000.0,
-                specific_gravity: 0.50,
-            },
+        // Check if this is a base grade with TOML data
+        if let Some(grade_code) = grade.code() {
+            // Look up from generated TOML data
+            if let Some(props) = sawn_lumber_data::lookup(species.code(), grade_code) {
+                return WoodProperties {
+                    species,
+                    grade,
+                    fb_psi: props.fb_psi,
+                    ft_psi: props.ft_psi,
+                    fv_psi: props.fv_psi,
+                    fc_perp_psi: props.fc_perp_psi,
+                    fc_psi: props.fc_psi,
+                    e_psi: props.e_psi,
+                    e_min_psi: props.e_min_psi,
+                    specific_gravity: props.specific_gravity,
+                };
+            }
+        }
 
-            // Southern Pine
-            (WoodSpecies::SouthernPine, WoodGrade::SelectStructural) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1500.0,
-                ft_psi: 1000.0,
-                fv_psi: 175.0,
-                fc_perp_psi: 565.0,
-                fc_psi: 1800.0,
-                e_psi: 1_800_000.0,
-                e_min_psi: 660_000.0,
-                specific_gravity: 0.55,
-            },
-            (WoodSpecies::SouthernPine, WoodGrade::No1) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1250.0,
-                ft_psi: 825.0,
-                fv_psi: 175.0,
-                fc_perp_psi: 565.0,
-                fc_psi: 1650.0,
-                e_psi: 1_700_000.0,
-                e_min_psi: 620_000.0,
-                specific_gravity: 0.55,
-            },
-            (WoodSpecies::SouthernPine, WoodGrade::No2) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 850.0,
-                ft_psi: 550.0,
-                fv_psi: 175.0,
-                fc_perp_psi: 565.0,
-                fc_psi: 1450.0,
-                e_psi: 1_400_000.0,
-                e_min_psi: 510_000.0,
-                specific_gravity: 0.55,
-            },
-            (WoodSpecies::SouthernPine, WoodGrade::No3) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 500.0,
-                ft_psi: 300.0,
-                fv_psi: 175.0,
-                fc_perp_psi: 565.0,
-                fc_psi: 825.0,
-                e_psi: 1_200_000.0,
-                e_min_psi: 440_000.0,
-                specific_gravity: 0.55,
-            },
-
-            // Hem-Fir
-            (WoodSpecies::HemFir, WoodGrade::SelectStructural) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1400.0,
-                ft_psi: 925.0,
-                fv_psi: 150.0,
-                fc_perp_psi: 405.0,
-                fc_psi: 1500.0,
-                e_psi: 1_600_000.0,
-                e_min_psi: 580_000.0,
-                specific_gravity: 0.43,
-            },
-            (WoodSpecies::HemFir, WoodGrade::No1) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1100.0,
-                ft_psi: 725.0,
-                fv_psi: 150.0,
-                fc_perp_psi: 405.0,
-                fc_psi: 1350.0,
-                e_psi: 1_500_000.0,
-                e_min_psi: 550_000.0,
-                specific_gravity: 0.43,
-            },
-            (WoodSpecies::HemFir, WoodGrade::No2) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 850.0,
-                ft_psi: 525.0,
-                fv_psi: 150.0,
-                fc_perp_psi: 405.0,
-                fc_psi: 1300.0,
-                e_psi: 1_300_000.0,
-                e_min_psi: 470_000.0,
-                specific_gravity: 0.43,
-            },
-            (WoodSpecies::HemFir, WoodGrade::No3) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 500.0,
-                ft_psi: 300.0,
-                fv_psi: 150.0,
-                fc_perp_psi: 405.0,
-                fc_psi: 750.0,
-                e_psi: 1_200_000.0,
-                e_min_psi: 440_000.0,
-                specific_gravity: 0.43,
-            },
-
-            // SPF (Spruce-Pine-Fir)
-            (WoodSpecies::SprucePineFir, WoodGrade::SelectStructural) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1250.0,
-                ft_psi: 825.0,
-                fv_psi: 135.0,
-                fc_perp_psi: 425.0,
-                fc_psi: 1400.0,
-                e_psi: 1_500_000.0,
-                e_min_psi: 550_000.0,
-                specific_gravity: 0.42,
-            },
-            (WoodSpecies::SprucePineFir, WoodGrade::No1) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1000.0,
-                ft_psi: 650.0,
-                fv_psi: 135.0,
-                fc_perp_psi: 425.0,
-                fc_psi: 1250.0,
-                e_psi: 1_400_000.0,
-                e_min_psi: 510_000.0,
-                specific_gravity: 0.42,
-            },
-            (WoodSpecies::SprucePineFir, WoodGrade::No2) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 875.0,
-                ft_psi: 450.0,
-                fv_psi: 135.0,
-                fc_perp_psi: 425.0,
-                fc_psi: 1150.0,
-                e_psi: 1_400_000.0,
-                e_min_psi: 510_000.0,
-                specific_gravity: 0.42,
-            },
-            (WoodSpecies::SprucePineFir, WoodGrade::No3) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 500.0,
-                ft_psi: 250.0,
-                fv_psi: 135.0,
-                fc_perp_psi: 425.0,
-                fc_psi: 650.0,
-                e_psi: 1_200_000.0,
-                e_min_psi: 440_000.0,
-                specific_gravity: 0.42,
-            },
-
-            // Douglas Fir-South
-            (WoodSpecies::DouglasFirSouth, WoodGrade::SelectStructural) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1350.0,
-                ft_psi: 900.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 520.0,
-                fc_psi: 1600.0,
-                e_psi: 1_400_000.0,
-                e_min_psi: 510_000.0,
-                specific_gravity: 0.46,
-            },
-            (WoodSpecies::DouglasFirSouth, WoodGrade::No1) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 1050.0,
-                ft_psi: 700.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 520.0,
-                fc_psi: 1450.0,
-                e_psi: 1_200_000.0,
-                e_min_psi: 440_000.0,
-                specific_gravity: 0.46,
-            },
-            (WoodSpecies::DouglasFirSouth, WoodGrade::No2) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 875.0,
-                ft_psi: 525.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 520.0,
-                fc_psi: 1350.0,
-                e_psi: 1_100_000.0,
-                e_min_psi: 400_000.0,
-                specific_gravity: 0.46,
-            },
-            (WoodSpecies::DouglasFirSouth, WoodGrade::No3) => WoodProperties {
-                species,
-                grade,
-                fb_psi: 500.0,
-                ft_psi: 300.0,
-                fv_psi: 180.0,
-                fc_perp_psi: 520.0,
-                fc_psi: 775.0,
-                e_psi: 1_000_000.0,
-                e_min_psi: 370_000.0,
-                specific_gravity: 0.46,
-            },
-
+        // Derived grades are computed from base grades
+        match grade {
             // Stud grade - use similar to No.3 for structural calcs
-            (species, WoodGrade::Stud) => {
+            WoodGrade::Stud => {
                 let base = Self::lookup(species, WoodGrade::No3);
                 WoodProperties {
                     grade: WoodGrade::Stud,
@@ -445,8 +247,8 @@ impl WoodProperties {
                 }
             }
 
-            // Construction, Standard, Utility - less common, approximate
-            (species, WoodGrade::Construction) => {
+            // Construction - approximately 15% higher Fb than No.2
+            WoodGrade::Construction => {
                 let base = Self::lookup(species, WoodGrade::No2);
                 WoodProperties {
                     grade: WoodGrade::Construction,
@@ -454,14 +256,18 @@ impl WoodProperties {
                     ..base
                 }
             }
-            (species, WoodGrade::Standard) => {
+
+            // Standard - same as No.3
+            WoodGrade::Standard => {
                 let base = Self::lookup(species, WoodGrade::No3);
                 WoodProperties {
                     grade: WoodGrade::Standard,
                     ..base
                 }
             }
-            (species, WoodGrade::Utility) => {
+
+            // Utility - reduced strength from No.3
+            WoodGrade::Utility => {
                 let base = Self::lookup(species, WoodGrade::No3);
                 WoodProperties {
                     grade: WoodGrade::Utility,
@@ -470,6 +276,9 @@ impl WoodProperties {
                     ..base
                 }
             }
+
+            // Base grades should have been handled above
+            _ => unreachable!("Base grade {} should have TOML data", grade),
         }
     }
 

@@ -4,8 +4,12 @@
 //! - Glulam (Structural Glued Laminated Timber) - NDS-S
 //! - LVL (Laminated Veneer Lumber)
 //! - PSL (Parallel Strand Lumber)
+//!
+//! Base design values are loaded from TOML at compile time.
 
 use serde::{Deserialize, Serialize};
+
+use crate::generated::engineered_wood_data;
 
 // ============================================================================
 // Glulam (Structural Glued Laminated Timber)
@@ -53,8 +57,8 @@ impl GlulamStressClass {
         GlulamStressClass::F24_V8,
     ];
 
-    /// Display name for UI
-    pub fn display_name(&self) -> &'static str {
+    /// Get the code string for TOML lookup (e.g., "24F-V4")
+    pub fn code(&self) -> &'static str {
         match self {
             GlulamStressClass::F16_E1_3 => "16F-1.3E",
             GlulamStressClass::F20_E1_5 => "20F-1.5E",
@@ -64,6 +68,11 @@ impl GlulamStressClass {
             GlulamStressClass::F24_V4 => "24F-V4",
             GlulamStressClass::F24_V8 => "24F-V8",
         }
+    }
+
+    /// Display name for UI
+    pub fn display_name(&self) -> &'static str {
+        self.code()
     }
 }
 
@@ -130,94 +139,24 @@ pub struct GlulamProperties {
 impl GlulamProperties {
     /// Look up glulam properties by stress class
     ///
-    /// Values are approximate based on NDS-S Table 5A/5B for Western Species.
+    /// Design values are loaded from TOML at compile time.
     /// For unbalanced layups, fb_neg_psi is lower than fb_pos_psi.
     pub fn lookup(stress_class: GlulamStressClass) -> Self {
-        match stress_class {
-            GlulamStressClass::F16_E1_3 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 1600.0,
-                fb_neg_psi: 1600.0,
-                ft_psi: 800.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 560.0,
-                fc_psi: 1400.0,
-                e_psi: 1_300_000.0,
-                e_min_psi: 685_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F20_E1_5 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2000.0,
-                fb_neg_psi: 2000.0,
-                ft_psi: 1000.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 560.0,
-                fc_psi: 1550.0,
-                e_psi: 1_500_000.0,
-                e_min_psi: 790_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F24_E1_7 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2400.0,
-                fb_neg_psi: 2400.0,
-                ft_psi: 1150.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 650.0,
-                fc_psi: 1650.0,
-                e_psi: 1_700_000.0,
-                e_min_psi: 895_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F24_E1_8 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2400.0,
-                fb_neg_psi: 2400.0,
-                ft_psi: 1150.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 650.0,
-                fc_psi: 1650.0,
-                e_psi: 1_800_000.0,
-                e_min_psi: 950_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F26_E1_9 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2600.0,
-                fb_neg_psi: 2600.0,
-                ft_psi: 1250.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 650.0,
-                fc_psi: 1750.0,
-                e_psi: 1_900_000.0,
-                e_min_psi: 1_000_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F24_V4 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2400.0,
-                fb_neg_psi: 1450.0, // Unbalanced - lower for negative bending
-                ft_psi: 1100.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 650.0,
-                fc_psi: 1600.0,
-                e_psi: 1_800_000.0,
-                e_min_psi: 950_000.0,
-                specific_gravity: 0.50,
-            },
-            GlulamStressClass::F24_V8 => GlulamProperties {
-                stress_class,
-                fb_pos_psi: 2400.0,
-                fb_neg_psi: 2400.0, // Balanced
-                ft_psi: 1100.0,
-                fv_psi: 265.0,
-                fc_perp_psi: 650.0,
-                fc_psi: 1600.0,
-                e_psi: 1_800_000.0,
-                e_min_psi: 950_000.0,
-                specific_gravity: 0.50,
-            },
+        // Look up from generated TOML data
+        let props = engineered_wood_data::lookup_glulam(stress_class.code())
+            .unwrap_or_else(|| panic!("Missing TOML data for glulam {}", stress_class.code()));
+
+        GlulamProperties {
+            stress_class,
+            fb_pos_psi: props.fb_pos_psi,
+            fb_neg_psi: props.fb_neg_psi,
+            ft_psi: props.ft_psi,
+            fv_psi: props.fv_psi,
+            fc_perp_psi: props.fc_perp_psi,
+            fc_psi: props.fc_psi,
+            e_psi: props.e_psi,
+            e_min_psi: props.e_min_psi,
+            specific_gravity: props.specific_gravity,
         }
     }
 
@@ -293,6 +232,14 @@ pub enum LvlGrade {
 impl LvlGrade {
     pub const ALL: [LvlGrade; 2] = [LvlGrade::Standard, LvlGrade::HighStrength];
 
+    /// Get the code string for TOML lookup (e.g., "LVL-2.0E")
+    pub fn code(&self) -> &'static str {
+        match self {
+            LvlGrade::Standard => "LVL-2.0E",
+            LvlGrade::HighStrength => "LVL-2.2E",
+        }
+    }
+
     pub fn display_name(&self) -> &'static str {
         match self {
             LvlGrade::Standard => "LVL 2.0E",
@@ -332,30 +279,23 @@ pub struct LvlProperties {
 
 impl LvlProperties {
     /// Look up LVL properties by grade
+    ///
+    /// Design values are loaded from TOML at compile time.
     pub fn lookup(grade: LvlGrade) -> Self {
-        match grade {
-            LvlGrade::Standard => LvlProperties {
-                grade,
-                fb_psi: 2600.0,
-                ft_psi: 1950.0,
-                fv_psi: 285.0,
-                fc_perp_psi: 750.0,
-                fc_psi: 2510.0,
-                e_psi: 2_000_000.0,
-                e_min_psi: 1_030_000.0,
-                specific_gravity: 0.50,
-            },
-            LvlGrade::HighStrength => LvlProperties {
-                grade,
-                fb_psi: 2900.0,
-                ft_psi: 2175.0,
-                fv_psi: 285.0,
-                fc_perp_psi: 750.0,
-                fc_psi: 2800.0,
-                e_psi: 2_200_000.0,
-                e_min_psi: 1_130_000.0,
-                specific_gravity: 0.50,
-            },
+        // Look up from generated TOML data
+        let props = engineered_wood_data::lookup_lvl(grade.code())
+            .unwrap_or_else(|| panic!("Missing TOML data for LVL {}", grade.code()));
+
+        LvlProperties {
+            grade,
+            fb_psi: props.fb_psi,
+            ft_psi: props.ft_psi,
+            fv_psi: props.fv_psi,
+            fc_perp_psi: props.fc_perp_psi,
+            fc_psi: props.fc_psi,
+            e_psi: props.e_psi,
+            e_min_psi: props.e_min_psi,
+            specific_gravity: props.specific_gravity,
         }
     }
 
@@ -425,6 +365,13 @@ pub enum PslGrade {
 impl PslGrade {
     pub const ALL: [PslGrade; 1] = [PslGrade::Standard];
 
+    /// Get the code string for TOML lookup (e.g., "PSL-2.0E")
+    pub fn code(&self) -> &'static str {
+        match self {
+            PslGrade::Standard => "PSL-2.0E",
+        }
+    }
+
     pub fn display_name(&self) -> &'static str {
         match self {
             PslGrade::Standard => "PSL 2.0E",
@@ -463,19 +410,23 @@ pub struct PslProperties {
 
 impl PslProperties {
     /// Look up PSL properties by grade
+    ///
+    /// Design values are loaded from TOML at compile time.
     pub fn lookup(grade: PslGrade) -> Self {
-        match grade {
-            PslGrade::Standard => PslProperties {
-                grade,
-                fb_psi: 2900.0,
-                ft_psi: 2025.0,
-                fv_psi: 290.0,
-                fc_perp_psi: 750.0,
-                fc_psi: 2900.0,
-                e_psi: 2_000_000.0,
-                e_min_psi: 1_030_000.0,
-                specific_gravity: 0.50,
-            },
+        // Look up from generated TOML data
+        let props = engineered_wood_data::lookup_psl(grade.code())
+            .unwrap_or_else(|| panic!("Missing TOML data for PSL {}", grade.code()));
+
+        PslProperties {
+            grade,
+            fb_psi: props.fb_psi,
+            ft_psi: props.ft_psi,
+            fv_psi: props.fv_psi,
+            fc_perp_psi: props.fc_perp_psi,
+            fc_psi: props.fc_psi,
+            e_psi: props.e_psi,
+            e_min_psi: props.e_min_psi,
+            specific_gravity: props.specific_gravity,
         }
     }
 

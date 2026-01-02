@@ -23,7 +23,7 @@ TOML Source Files (human-readable)
 | Phase | Bead ID | Title | Status | Blocked By |
 |-------|---------|-------|--------|------------|
 | 1 | Stratify-cey | Infrastructure setup | CLOSED | - |
-| 2 | Stratify-idi | Migrate existing data | IN_PROGRESS | - |
+| 2 | Stratify-idi | Migrate existing data | CLOSED | - |
 | 3 | Stratify-g0o | Expand NDS coverage | OPEN | Stratify-q38 (licensing) |
 | 4 | Stratify-4zy | Manufacturer data | OPEN | - |
 
@@ -72,9 +72,9 @@ calc_core/
 
 ---
 
-## Phase 2: Migrate Existing Data [IN PROGRESS]
+## Phase 2: Migrate Existing Data [COMPLETE]
 
-**Bead:** `Stratify-idi` (IN_PROGRESS)
+**Bead:** `Stratify-idi` (CLOSED)
 
 ### Goal
 Replace hardcoded Rust match statements with TOML-generated code.
@@ -86,12 +86,19 @@ Replace hardcoded Rust match statements with TOML-generated code.
 - [x] Verify PSL TOML matches `engineered_wood.rs` (1 grade)
 - [x] All 40 tests pass with current TOML data
 
-### Phase 2B: Module Migration [TODO]
-- [ ] Update `materials/sawn_lumber.rs` to use generated lookup
-- [ ] Update `materials/engineered_wood.rs` to use generated lookup
-- [ ] Export lumber sizes to `lumber_sizes.toml`
-- [ ] Remove hardcoded match statements
-- [ ] Run full test suite to verify equivalence
+### Phase 2B: Module Migration [COMPLETE]
+- [x] Update `materials/sawn_lumber.rs` to use generated lookup
+- [x] Update `materials/engineered_wood.rs` to use generated lookup
+- [x] Add `code()` methods to enums for TOML key lookup
+- [x] Update build.rs to handle Glulam's special format (Fb_pos/Fb_neg)
+- [x] Remove hardcoded match statements
+- [x] All 222 tests pass (verified 2026-01-02)
+
+### Technical Notes (Phase 2B)
+- Sawn lumber: Base grades (SS, No1, No2, No3) loaded from TOML; derived grades (Stud, Construction, Standard, Utility) computed in Rust
+- Glulam: Uses separate `GlulamProps` struct with `fb_pos_psi` and `fb_neg_psi`
+- LVL/PSL: Uses `EngineeredWoodProps` struct with optional `depth_factor_exponent`
+- Lumber sizes: Kept hardcoded (not prioritized for Phase 2)
 
 ### TOML Files Created (Phase 2A)
 | File | Data | Verified |
