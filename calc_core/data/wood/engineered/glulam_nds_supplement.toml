@@ -1,0 +1,122 @@
+# NDS Supplement - Glulam Reference Design Values
+#
+# Source: NDS Supplement Table 5A/5B (Western Species, approximate values)
+# Product Type: Glulam (Structural Glued Laminated Timber)
+#
+# NOTES:
+# - Glulam has two Fb values: Fb_pos (tension on bottom) and Fb_neg (tension on top)
+# - For balanced layups, Fb_pos == Fb_neg
+# - For unbalanced (V-grade), Fb_neg < Fb_pos
+# - All values in psi
+
+[metadata]
+source = "NDS Supplement Table 5A/5B"
+product_type = "Glulam"
+transcribed_date = "2026-01-02"
+verified_against = "calc_core/src/materials/engineered_wood.rs"
+notes = "Values match existing hardcoded implementation. 7 stress classes."
+
+# 16F-1.3E - Economy grade
+[[products]]
+name = "16F-1.3E"
+code = "16F-1.3E"
+Fb_pos = 1600.0
+Fb_neg = 1600.0
+Ft = 800.0
+Fv = 265.0
+Fc_perp = 560.0
+Fc = 1400.0
+E = 1300000.0
+Emin = 685000.0
+SG = 0.50
+is_balanced = true
+
+# 20F-1.5E - Standard grade
+[[products]]
+name = "20F-1.5E"
+code = "20F-1.5E"
+Fb_pos = 2000.0
+Fb_neg = 2000.0
+Ft = 1000.0
+Fv = 265.0
+Fc_perp = 560.0
+Fc = 1550.0
+E = 1500000.0
+Emin = 790000.0
+SG = 0.50
+is_balanced = true
+
+# 24F-1.7E
+[[products]]
+name = "24F-1.7E"
+code = "24F-1.7E"
+Fb_pos = 2400.0
+Fb_neg = 2400.0
+Ft = 1150.0
+Fv = 265.0
+Fc_perp = 650.0
+Fc = 1650.0
+E = 1700000.0
+Emin = 895000.0
+SG = 0.50
+is_balanced = true
+
+# 24F-1.8E - Common structural grade
+[[products]]
+name = "24F-1.8E"
+code = "24F-1.8E"
+Fb_pos = 2400.0
+Fb_neg = 2400.0
+Ft = 1150.0
+Fv = 265.0
+Fc_perp = 650.0
+Fc = 1650.0
+E = 1800000.0
+Emin = 950000.0
+SG = 0.50
+is_balanced = true
+
+# 26F-1.9E - High strength
+[[products]]
+name = "26F-1.9E"
+code = "26F-1.9E"
+Fb_pos = 2600.0
+Fb_neg = 2600.0
+Ft = 1250.0
+Fv = 265.0
+Fc_perp = 650.0
+Fc = 1750.0
+E = 1900000.0
+Emin = 1000000.0
+SG = 0.50
+is_balanced = true
+
+# 24F-V4 - Visually graded, unbalanced (common for simple-span beams)
+[[products]]
+name = "24F-V4"
+code = "24F-V4"
+Fb_pos = 2400.0
+Fb_neg = 1450.0
+Ft = 1100.0
+Fv = 265.0
+Fc_perp = 650.0
+Fc = 1600.0
+E = 1800000.0
+Emin = 950000.0
+SG = 0.50
+is_balanced = false
+
+# 24F-V8 - Visually graded, balanced (for continuous spans)
+[[products]]
+name = "24F-V8"
+code = "24F-V8"
+Fb_pos = 2400.0
+Fb_neg = 2400.0
+Ft = 1100.0
+Fv = 265.0
+Fc_perp = 650.0
+Fc = 1600.0
+E = 1800000.0
+Emin = 950000.0
+SG = 0.50
+is_balanced = true

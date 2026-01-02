@@ -2,38 +2,13 @@
 #
 # Source: NDS Supplement: Design Values for Wood Construction, 2018 Edition
 # Table: 4A
-# Scope: Dimension lumber (2" to 4" thick)
-#
-# SCHEMA:
-# -------
-# [metadata]
-#   source        = "NDS Supplement"
-#   table         = "4A"
-#   edition_year  = 2018
-#   transcribed_by = "Name of transcriber"
-#   transcribed_date = "YYYY-MM-DD"
-#   notes         = "Any notes about this data"
-#
-# [[species]]
-#   name  = "Human-readable species name"
-#   code  = "Short code for lookup (DF-L, SP, HF, etc.)"
-#
-#   [[species.grades]]
-#     name      = "Human-readable grade name"
-#     code      = "Grade code (SS, No1, No2, etc.)"
-#     Fb        = Bending stress (psi)
-#     Ft        = Tension parallel to grain (psi)
-#     Fv        = Shear (psi)
-#     Fc_perp   = Compression perpendicular to grain (psi)
-#     Fc        = Compression parallel to grain (psi)
-#     E         = Modulus of elasticity (psi)
-#     Emin      = Minimum E for stability calculations (psi)
-#     SG        = Specific gravity
+# Scope: Dimension lumber (2" to 4" thick), values for 2x10 and wider
 #
 # NOTES:
 # - All stress values are in psi (pounds per square inch)
 # - E and Emin are in psi (not ksi or million psi)
-# - Values are for dimension lumber 2" to 4" thick
+# - Only SS, No1, No2, No3 grades stored here
+# - Stud, Construction, Standard, Utility are derived in code from base grades
 # - Apply appropriate adjustment factors per NDS Chapter 4
 
 [metadata]
@@ -42,7 +17,8 @@ table = "4A"
 edition_year = 2018
 transcribed_by = "Stratify Team"
 transcribed_date = "2026-01-02"
-notes = "Initial subset - 5 common species, 8 grades. Full table requires NDS license."
+verified_against = "calc_core/src/materials/sawn_lumber.rs"
+notes = "Values match existing hardcoded implementation. 5 species x 4 base grades."
 
 # Douglas Fir-Larch
 [[species]]
@@ -97,54 +73,6 @@ code = "DF-L"
   Emin = 510000.0
   SG = 0.50
 
-  [[species.grades]]
-  name = "Stud"
-  code = "Stud"
-  Fb = 700.0
-  Ft = 450.0
-  Fv = 180.0
-  Fc_perp = 625.0
-  Fc = 850.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.50
-
-  [[species.grades]]
-  name = "Construction"
-  code = "Const"
-  Fb = 1000.0
-  Ft = 650.0
-  Fv = 180.0
-  Fc_perp = 625.0
-  Fc = 1650.0
-  E = 1500000.0
-  Emin = 550000.0
-  SG = 0.50
-
-  [[species.grades]]
-  name = "Standard"
-  code = "Std"
-  Fb = 575.0
-  Ft = 375.0
-  Fv = 180.0
-  Fc_perp = 625.0
-  Fc = 1400.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.50
-
-  [[species.grades]]
-  name = "Utility"
-  code = "Util"
-  Fb = 275.0
-  Ft = 175.0
-  Fv = 180.0
-  Fc_perp = 625.0
-  Fc = 900.0
-  E = 1300000.0
-  Emin = 470000.0
-  SG = 0.50
-
 # Southern Pine
 [[species]]
 name = "Southern Pine"
@@ -153,8 +81,8 @@ code = "SP"
   [[species.grades]]
   name = "Select Structural"
   code = "SS"
-  Fb = 2050.0
-  Ft = 1200.0
+  Fb = 1500.0
+  Ft = 1000.0
   Fv = 175.0
   Fc_perp = 565.0
   Fc = 1800.0
@@ -165,8 +93,8 @@ code = "SP"
   [[species.grades]]
   name = "No. 1"
   code = "No1"
-  Fb = 1500.0
-  Ft = 900.0
+  Fb = 1250.0
+  Ft = 825.0
   Fv = 175.0
   Fc_perp = 565.0
   Fc = 1650.0
@@ -177,73 +105,25 @@ code = "SP"
   [[species.grades]]
   name = "No. 2"
   code = "No2"
-  Fb = 1250.0
-  Ft = 750.0
+  Fb = 850.0
+  Ft = 550.0
   Fv = 175.0
   Fc_perp = 565.0
   Fc = 1450.0
-  E = 1600000.0
-  Emin = 580000.0
+  E = 1400000.0
+  Emin = 510000.0
   SG = 0.55
 
   [[species.grades]]
   name = "No. 3"
   code = "No3"
-  Fb = 700.0
-  Ft = 425.0
+  Fb = 500.0
+  Ft = 300.0
   Fv = 175.0
   Fc_perp = 565.0
   Fc = 825.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.55
-
-  [[species.grades]]
-  name = "Stud"
-  code = "Stud"
-  Fb = 850.0
-  Ft = 500.0
-  Fv = 175.0
-  Fc_perp = 565.0
-  Fc = 875.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.55
-
-  [[species.grades]]
-  name = "Construction"
-  code = "Const"
-  Fb = 1100.0
-  Ft = 650.0
-  Fv = 175.0
-  Fc_perp = 565.0
-  Fc = 1600.0
-  E = 1500000.0
-  Emin = 550000.0
-  SG = 0.55
-
-  [[species.grades]]
-  name = "Standard"
-  code = "Std"
-  Fb = 625.0
-  Ft = 375.0
-  Fv = 175.0
-  Fc_perp = 565.0
-  Fc = 1350.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.55
-
-  [[species.grades]]
-  name = "Utility"
-  code = "Util"
-  Fb = 300.0
-  Ft = 175.0
-  Fv = 175.0
-  Fc_perp = 565.0
-  Fc = 875.0
-  E = 1300000.0
-  Emin = 470000.0
+  E = 1200000.0
+  Emin = 440000.0
   SG = 0.55
 
 # Hem-Fir
@@ -299,54 +179,6 @@ code = "HF"
   Emin = 440000.0
   SG = 0.43
 
-  [[species.grades]]
-  name = "Stud"
-  code = "Stud"
-  Fb = 675.0
-  Ft = 400.0
-  Fv = 150.0
-  Fc_perp = 405.0
-  Fc = 800.0
-  E = 1200000.0
-  Emin = 440000.0
-  SG = 0.43
-
-  [[species.grades]]
-  name = "Construction"
-  code = "Const"
-  Fb = 975.0
-  Ft = 600.0
-  Fv = 150.0
-  Fc_perp = 405.0
-  Fc = 1550.0
-  E = 1300000.0
-  Emin = 470000.0
-  SG = 0.43
-
-  [[species.grades]]
-  name = "Standard"
-  code = "Std"
-  Fb = 550.0
-  Ft = 350.0
-  Fv = 150.0
-  Fc_perp = 405.0
-  Fc = 1300.0
-  E = 1200000.0
-  Emin = 440000.0
-  SG = 0.43
-
-  [[species.grades]]
-  name = "Utility"
-  code = "Util"
-  Fb = 275.0
-  Ft = 175.0
-  Fv = 150.0
-  Fc_perp = 405.0
-  Fc = 850.0
-  E = 1100000.0
-  Emin = 400000.0
-  SG = 0.43
-
 # Spruce-Pine-Fir
 [[species]]
 name = "Spruce-Pine-Fir"
@@ -356,7 +188,7 @@ code = "SPF"
   name = "Select Structural"
   code = "SS"
   Fb = 1250.0
-  Ft = 700.0
+  Ft = 825.0
   Fv = 135.0
   Fc_perp = 425.0
   Fc = 1400.0
@@ -367,11 +199,11 @@ code = "SPF"
   [[species.grades]]
   name = "No. 1"
   code = "No1"
-  Fb = 975.0
-  Ft = 575.0
+  Fb = 1000.0
+  Ft = 650.0
   Fv = 135.0
   Fc_perp = 425.0
-  Fc = 1150.0
+  Fc = 1250.0
   E = 1400000.0
   Emin = 510000.0
   SG = 0.42
@@ -400,151 +232,55 @@ code = "SPF"
   Emin = 440000.0
   SG = 0.42
 
-  [[species.grades]]
-  name = "Stud"
-  code = "Stud"
-  Fb = 675.0
-  Ft = 350.0
-  Fv = 135.0
-  Fc_perp = 425.0
-  Fc = 725.0
-  E = 1200000.0
-  Emin = 440000.0
-  SG = 0.42
-
-  [[species.grades]]
-  name = "Construction"
-  code = "Const"
-  Fb = 1000.0
-  Ft = 500.0
-  Fv = 135.0
-  Fc_perp = 425.0
-  Fc = 1400.0
-  E = 1400000.0
-  Emin = 510000.0
-  SG = 0.42
-
-  [[species.grades]]
-  name = "Standard"
-  code = "Std"
-  Fb = 550.0
-  Ft = 275.0
-  Fv = 135.0
-  Fc_perp = 425.0
-  Fc = 1150.0
-  E = 1200000.0
-  Emin = 440000.0
-  SG = 0.42
-
-  [[species.grades]]
-  name = "Utility"
-  code = "Util"
-  Fb = 275.0
-  Ft = 125.0
-  Fv = 135.0
-  Fc_perp = 425.0
-  Fc = 750.0
-  E = 1100000.0
-  Emin = 400000.0
-  SG = 0.42
-
-# Spruce-Pine-Fir (South)
+# Douglas Fir-South
 [[species]]
-name = "Spruce-Pine-Fir (South)"
-code = "SPFS"
+name = "Douglas Fir-South"
+code = "DF-S"
 
   [[species.grades]]
   name = "Select Structural"
   code = "SS"
-  Fb = 1300.0
-  Ft = 775.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 1200.0
-  E = 1300000.0
-  Emin = 470000.0
-  SG = 0.36
+  Fb = 1350.0
+  Ft = 900.0
+  Fv = 180.0
+  Fc_perp = 520.0
+  Fc = 1600.0
+  E = 1400000.0
+  Emin = 510000.0
+  SG = 0.46
 
   [[species.grades]]
   name = "No. 1"
   code = "No1"
   Fb = 1050.0
-  Ft = 625.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 1050.0
+  Ft = 700.0
+  Fv = 180.0
+  Fc_perp = 520.0
+  Fc = 1450.0
   E = 1200000.0
   Emin = 440000.0
-  SG = 0.36
+  SG = 0.46
 
   [[species.grades]]
   name = "No. 2"
   code = "No2"
-  Fb = 775.0
-  Ft = 450.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 900.0
+  Fb = 875.0
+  Ft = 525.0
+  Fv = 180.0
+  Fc_perp = 520.0
+  Fc = 1350.0
   E = 1100000.0
   Emin = 400000.0
-  SG = 0.36
+  SG = 0.46
 
   [[species.grades]]
   name = "No. 3"
   code = "No3"
-  Fb = 450.0
-  Ft = 250.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 525.0
-  E = 1000000.0
-  Emin = 370000.0
-  SG = 0.36
-
-  [[species.grades]]
-  name = "Stud"
-  code = "Stud"
-  Fb = 600.0
-  Ft = 350.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 575.0
-  E = 1000000.0
-  Emin = 370000.0
-  SG = 0.36
-
-  [[species.grades]]
-  name = "Construction"
-  code = "Const"
-  Fb = 925.0
-  Ft = 550.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 1150.0
-  E = 1100000.0
-  Emin = 400000.0
-  SG = 0.36
-
-  [[species.grades]]
-  name = "Standard"
-  code = "Std"
-  Fb = 525.0
+  Fb = 500.0
   Ft = 300.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 950.0
+  Fv = 180.0
+  Fc_perp = 520.0
+  Fc = 775.0
   E = 1000000.0
   Emin = 370000.0
-  SG = 0.36
-
-  [[species.grades]]
-  name = "Utility"
-  code = "Util"
-  Fb = 250.0
-  Ft = 150.0
-  Fv = 135.0
-  Fc_perp = 335.0
-  Fc = 625.0
-  E = 900000.0
-  Emin = 330000.0
-  SG = 0.36
+  SG = 0.46

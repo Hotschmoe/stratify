@@ -1,7 +1,7 @@
 # NDS Data Architecture Action Plan
 
 > Central tracking document for TOML-based materials data migration.
-> Last updated: 2026-01-02
+> Last updated: 2026-01-02 12:30 MST
 
 ## Architecture Overview
 
@@ -23,7 +23,7 @@ TOML Source Files (human-readable)
 | Phase | Bead ID | Title | Status | Blocked By |
 |-------|---------|-------|--------|------------|
 | 1 | Stratify-cey | Infrastructure setup | CLOSED | - |
-| 2 | Stratify-idi | Migrate existing data | OPEN | Phase 1 (done) |
+| 2 | Stratify-idi | Migrate existing data | IN_PROGRESS | - |
 | 3 | Stratify-g0o | Expand NDS coverage | OPEN | Stratify-q38 (licensing) |
 | 4 | Stratify-4zy | Manufacturer data | OPEN | - |
 
@@ -72,23 +72,36 @@ calc_core/
 
 ---
 
-## Phase 2: Migrate Existing Data [TODO]
+## Phase 2: Migrate Existing Data [IN PROGRESS]
 
-**Bead:** `Stratify-idi` (OPEN)
+**Bead:** `Stratify-idi` (IN_PROGRESS)
 
 ### Goal
 Replace hardcoded Rust match statements with TOML-generated code.
 
-### Tasks
-- [ ] Verify `nds_2018_table4a.toml` values match `sawn_lumber.rs`
-- [ ] Export glulam data to `engineered/glulam_nds.toml`
-- [ ] Verify LVL/PSL TOML matches `engineered_wood.rs`
+### Phase 2A: TOML Data Verification [COMPLETE]
+- [x] Verify `nds_2018_table4a.toml` values match `sawn_lumber.rs` (5 species x 4 base grades)
+- [x] Export glulam data to `engineered/glulam_nds_supplement.toml` (7 stress classes)
+- [x] Verify LVL TOML matches `engineered_wood.rs` (2 grades)
+- [x] Verify PSL TOML matches `engineered_wood.rs` (1 grade)
+- [x] All 40 tests pass with current TOML data
+
+### Phase 2B: Module Migration [TODO]
+- [ ] Update `materials/sawn_lumber.rs` to use generated lookup
+- [ ] Update `materials/engineered_wood.rs` to use generated lookup
 - [ ] Export lumber sizes to `lumber_sizes.toml`
-- [ ] Update `materials/` modules to use generated code
 - [ ] Remove hardcoded match statements
 - [ ] Run full test suite to verify equivalence
 
-### Current Hardcoded Locations
+### TOML Files Created (Phase 2A)
+| File | Data | Verified |
+|------|------|----------|
+| `sawn_lumber/nds_2018_table4a.toml` | 5 species x 4 grades | Yes |
+| `engineered/glulam_nds_supplement.toml` | 7 stress classes | Yes |
+| `engineered/lvl_generic.toml` | 2 grades (2.0E, 2.2E) | Yes |
+| `engineered/psl_generic.toml` | 1 grade (2.0E) | Yes |
+
+### Current Hardcoded Locations (to migrate in Phase 2B)
 | File | Data | Lines (approx) |
 |------|------|----------------|
 | `materials/sawn_lumber.rs` | NDS 2018 Table 4A | 180-350 |

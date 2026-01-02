@@ -3,28 +3,6 @@
 # Source: Representative values from industry specifications
 # Note: For actual design, use manufacturer-specific values with ICC-ES report
 #
-# SCHEMA:
-# -------
-# [metadata]
-#   source       = "Source document"
-#   product_type = "LVL" | "PSL" | "LSL" | "Glulam"
-#   manufacturer = "Manufacturer name" (optional, omit for generic)
-#   evaluation_report = "ESR-XXXX" (optional)
-#   transcribed_date = "YYYY-MM-DD"
-#
-# [[products]]
-#   name           = "Human-readable product name"
-#   code           = "Product code for lookup"
-#   Fb             = Bending stress at 12" depth (psi)
-#   Ft             = Tension parallel to grain (psi)
-#   Fv             = Shear (psi)
-#   Fc_perp        = Compression perpendicular to grain (psi)
-#   Fc             = Compression parallel to grain (psi)
-#   E              = Modulus of elasticity (psi)
-#   Emin           = Minimum E for stability (psi)
-#   SG             = Specific gravity
-#   depth_factor_exponent = Exponent for depth adjustment (default 0.111)
-#
 # DEPTH ADJUSTMENT:
 # For depths > 12": Fb_adjusted = Fb * (12/d)^exponent
 # Standard exponent for LVL is 0.111 (1/9)
@@ -33,6 +11,8 @@
 source = "Representative industry values"
 product_type = "LVL"
 transcribed_date = "2026-01-02"
+verified_against = "calc_core/src/materials/engineered_wood.rs"
+notes = "Values match existing hardcoded implementation. 2 grades."
 
 [[products]]
 name = "Standard LVL 2.0E"
