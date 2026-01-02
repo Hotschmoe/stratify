@@ -1,0 +1,73 @@
+# Stratify Material Data Sources
+#
+# This file tracks the provenance of all material data in the data/wood directory.
+# Each entry documents where the data came from, when it was transcribed, and
+# any relevant notes about the transcription process.
+#
+# IMPORTANT: When adding new data, create an entry here FIRST.
+
+[nds_2018]
+name = "NDS 2018 Supplement"
+publisher = "American Wood Council (AWC)"
+document = "NDS Supplement: Design Values for Wood Construction"
+edition = "2018"
+tables_used = ["4A", "4B", "5A", "5B"]
+license_status = "pending"  # "pending", "purchased", "public_domain"
+notes = """
+Current implementation uses a subset of Table 4A values.
+Full transcription requires licensing agreement with AWC.
+Contact: info@awc.org
+"""
+
+[nds_2015]
+name = "NDS 2015 Supplement"
+publisher = "American Wood Council (AWC)"
+document = "AWC NDS 2015 Supplement.pdf"
+edition = "2015"
+local_path = "codes/2015/AWC NDS 2015 Supplement.pdf"
+tables_used = []  # Tables to be extracted
+license_status = "available"  # We have the PDF
+notes = """
+PDF available locally for reference.
+Use pdf-extractor tool to extract tables.
+"""
+
+[weyerhaeuser_tji]
+name = "Weyerhaeuser Trus Joist"
+publisher = "Weyerhaeuser"
+document = "Trus Joist Specifier's Guide"
+icc_report = "ESR-1153"  # Example - verify current report number
+license_status = "public"  # Published design values
+products = ["LVL", "PSL", "I-joists"]
+notes = """
+Design values from published specifier guides are generally available
+for use in structural engineering software. Verify with manufacturer
+if embedding in commercial software.
+"""
+
+[lp_solidstart]
+name = "LP SolidStart"
+publisher = "Louisiana-Pacific (LP)"
+document = "LP SolidStart LVL Specifier's Guide"
+icc_report = "ESR-2403"  # Example - verify current report number
+license_status = "public"
+products = ["LVL", "LSL", "I-joists"]
+notes = """
+Similar to Weyerhaeuser - published design values.
+"""
+
+# Template for adding new sources:
+# [source_id]
+# name = "Human-readable name"
+# publisher = "Publisher name"
+# document = "Document title"
+# edition = "Year or version"
+# license_status = "pending|purchased|public_domain|public"
+# local_path = "relative/path/to/file.pdf"  # If we have a local copy
+# icc_report = "ESR-XXXX"  # For evaluation reports
+# products = ["LVL", "PSL"]  # For manufacturer data
+# transcribed_by = "Name"
+# transcribed_date = "YYYY-MM-DD"
+# notes = """
+# Any relevant notes about the source or transcription.
+# """

@@ -40,6 +40,7 @@ pub mod calculations;
 pub mod equations;
 pub mod errors;
 pub mod file_io;
+pub mod generated;
 pub mod loads;
 pub mod materials;
 pub mod nds_factors;

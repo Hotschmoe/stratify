@@ -1,0 +1,39 @@
+# Generic PSL (Parallel Strand Lumber) Design Values
+#
+# Source: Representative values from industry specifications
+# Note: For actual design, use manufacturer-specific values with ICC-ES report
+#
+# PSL (Parallam, etc.) is manufactured from long wood strands bonded with
+# adhesive under heat and pressure. It has higher strength than LVL and
+# is commonly used for long-span headers and beams.
+
+[metadata]
+source = "Representative industry values"
+product_type = "PSL"
+transcribed_date = "2026-01-02"
+
+[[products]]
+name = "Standard PSL 2.0E"
+code = "PSL-2.0E"
+Fb = 2900.0
+Ft = 2025.0
+Fv = 290.0
+Fc_perp = 750.0
+Fc = 2900.0
+E = 2000000.0
+Emin = 1030000.0
+SG = 0.50
+depth_factor_exponent = 0.111
+
+[[products]]
+name = "High-Strength PSL 2.2E"
+code = "PSL-2.2E"
+Fb = 3100.0
+Ft = 2200.0
+Fv = 290.0
+Fc_perp = 750.0
+Fc = 3100.0
+E = 2200000.0
+Emin = 1130000.0
+SG = 0.50
+depth_factor_exponent = 0.111
