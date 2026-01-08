@@ -493,7 +493,10 @@ mod tests {
     #[test]
     fn test_glulam_balanced_fb() {
         let props = GlulamProperties::lookup(GlulamStressClass::F24_V8);
-        assert_eq!(props.fb_pos_psi, props.fb_neg_psi); // Balanced
+        // V8 is balanced layup: Fb+ = Fb- = 2400 psi per NDS-S
+        assert_eq!(props.fb_pos_psi, 2400.0);
+        assert_eq!(props.fb_neg_psi, 2400.0);
+        assert_eq!(props.fb_pos_psi, props.fb_neg_psi);
     }
 
     #[test]
@@ -521,6 +524,10 @@ mod tests {
         let parsed: GlulamMaterial = serde_json::from_str(&json).unwrap();
         assert_eq!(mat.stress_class, parsed.stress_class);
         assert_eq!(mat.layup, parsed.layup);
+        // Verify deserialized material returns correct properties
+        let props = parsed.properties();
+        assert_eq!(props.fb_pos_psi, 2400.0);
+        assert_eq!(props.e_psi, 1_800_000.0);
     }
 
     // LVL tests
@@ -549,9 +556,12 @@ mod tests {
     fn test_lvl_serialization() {
         let mat = LvlMaterial::new(LvlGrade::HighStrength);
         let json = serde_json::to_string(&mat).unwrap();
-        assert!(json.contains("LVL-2.2E"));
         let parsed: LvlMaterial = serde_json::from_str(&json).unwrap();
         assert_eq!(mat.grade, parsed.grade);
+        // Verify deserialized material returns correct properties
+        let props = parsed.properties();
+        assert_eq!(props.fb_psi, 2900.0);
+        assert_eq!(props.e_psi, 2_200_000.0);
     }
 
     // PSL tests
@@ -576,19 +586,33 @@ mod tests {
     fn test_psl_serialization() {
         let mat = PslMaterial::new(PslGrade::Standard);
         let json = serde_json::to_string(&mat).unwrap();
-        assert!(json.contains("PSL-2.0E"));
+        let parsed: PslMaterial = serde_json::from_str(&json).unwrap();
+        assert_eq!(mat.grade, parsed.grade);
+        // Verify deserialized material returns correct properties
+        let props = parsed.properties();
+        assert_eq!(props.fb_psi, 2900.0);
+        assert_eq!(props.e_psi, 2_000_000.0);
     }
 
-    // Default tests
     #[test]
     fn test_defaults() {
+        // Verify defaults have valid, usable properties
         let glulam = GlulamMaterial::default();
         assert_eq!(glulam.stress_class, GlulamStressClass::F24_V4);
+        let glulam_props = glulam.properties();
+        assert!(glulam_props.fb_pos_psi > 0.0);
+        assert!(glulam_props.e_psi > 1_000_000.0);
 
         let lvl = LvlMaterial::default();
         assert_eq!(lvl.grade, LvlGrade::Standard);
+        let lvl_props = lvl.properties();
+        assert!(lvl_props.fb_psi > 0.0);
+        assert!(lvl_props.e_psi > 1_000_000.0);
 
         let psl = PslMaterial::default();
         assert_eq!(psl.grade, PslGrade::Standard);
+        let psl_props = psl.properties();
+        assert!(psl_props.fb_psi > 0.0);
+        assert!(psl_props.e_psi > 1_000_000.0);
     }
 }

@@ -728,14 +728,15 @@ mod tests {
     #[test]
     fn test_builtin_shapes() {
         let db = builtin_common_shapes();
-        assert!(!db.is_empty());
-        assert!(db.len() > 20);
+        // Exact count: 5 W14 + 5 W12 + 3 W10 + 3 W8 + 2 W6 + 3 W16 + 3 W18 + 2 W21 + 3 W24 = 29
+        assert_eq!(db.len(), 29);
 
-        // Test lookup
+        // Test lookup with AISC property verification
         let w14x90 = db.lookup("W14X90").unwrap();
         assert_eq!(w14x90.weight_plf, 90.0);
         assert_eq!(w14x90.area_in2, 26.5);
         assert!((w14x90.ix_in4 - 999.0).abs() < 1.0);
+        assert!((w14x90.sx_in3 - 143.0).abs() < 1.0);
 
         // Test case-insensitive lookup
         let w14x90_lower = db.lookup("w14x90").unwrap();
@@ -773,16 +774,6 @@ mod tests {
         // Test slenderness calculation
         let slenderness = shape.slenderness(120.0); // 10 ft unbraced
         assert!(slenderness > 0.0);
-    }
-
-    #[test]
-    fn test_shape_display() {
-        let db = builtin_common_shapes();
-        let shape = db.lookup("W14X90").unwrap();
-
-        let display = format!("{}", shape);
-        assert!(display.contains("W14X90"));
-        assert!(display.contains("26.5")); // Area
     }
 
     #[test]

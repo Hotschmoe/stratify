@@ -1472,11 +1472,22 @@ mod tests {
 
     #[test]
     fn test_all_equations_have_metadata() {
+        // Verify exact count of registered equations
+        assert_eq!(ALL_EQUATIONS.len(), 35);
+
         for eq in ALL_EQUATIONS {
             let meta = eq.metadata();
             assert!(!meta.name.is_empty(), "Equation {:?} has no name", eq);
             assert!(!meta.formula_typst.is_empty(), "Equation {:?} has no formula", eq);
+            assert!(!meta.variables.is_empty(), "Equation {:?} has no variables", eq);
         }
+
+        // Spot-check key formulas for correctness
+        let uniform_max = Equation::UniformLoadMaxMoment.metadata();
+        assert!(uniform_max.formula_plain.contains("wL^2/8"), "Uniform load max moment formula wrong");
+
+        let bending = Equation::BendingStress.metadata();
+        assert!(bending.formula_plain.contains("M / S"), "Bending stress formula wrong");
     }
 
     #[test]
@@ -1507,7 +1518,12 @@ mod tests {
         tracker.record(Equation::BendingStress, "test");
 
         let by_cat = tracker.by_category();
-        assert!(by_cat.len() >= 2); // At least InternalForces, Deflections, Stresses
+        // Exactly 3 categories: InternalForces, Deflections, Stresses
+        assert_eq!(by_cat.len(), 3);
+        let categories: Vec<_> = by_cat.iter().map(|(cat, _)| *cat).collect();
+        assert!(categories.contains(&EquationCategory::InternalForces));
+        assert!(categories.contains(&EquationCategory::Deflections));
+        assert!(categories.contains(&EquationCategory::Stresses));
     }
 
     #[test]
