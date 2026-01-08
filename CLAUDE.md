@@ -1,6 +1,6 @@
-# CLAUDE.md - Laminae
+# CLAUDE.md - Stratify
 
-## RULE 1 – ABSOLUTE (DO NOT EVER VIOLATE THIS)
+## RULE 1 - ABSOLUTE (DO NOT EVER VIOLATE THIS)
 
 You may NOT delete any file or directory unless I explicitly give the exact command **in this session**.
 
@@ -35,7 +35,7 @@ If that audit trail is missing, then you must act as if the operation never happ
 
 ### Version Updates (SemVer)
 
-When making commits, update the `version` in `build.zig.zon` following [Semantic Versioning](https://semver.org/):
+When making commits, update the `version` in `Cargo.toml` (workspace root) following [Semantic Versioning](https://semver.org/):
 
 - **MAJOR** (X.0.0): Breaking changes or incompatible API modifications
 - **MINOR** (0.X.0): New features, backward-compatible additions
@@ -148,7 +148,7 @@ git push  # Push to remote
 
 ```
 [ ] File issues for remaining work (bd create)
-[ ] Run quality gates (tests, linters)
+[ ] Run quality gates (cargo test, cargo clippy)
 [ ] Update issue statuses (bd update/close)
 [ ] Run bd sync
 [ ] Run git push and verify success
@@ -180,10 +180,8 @@ tools:
 | Agent | Model | Purpose |
 |-------|-------|---------|
 | coder-sonnet | sonnet | Fast, precise code changes with atomic commits |
+| build-verifier | sonnet | Validates all targets (native + WASM) compile |
 | gemini-analyzer | sonnet | Large-context analysis via Gemini CLI (1M+ context) |
-| build-verifier | sonnet | Pre-merge validation for all 4 kernel variants |
-| regression-detector | haiku | Smoke token comparison against baseline |
-| dtb-analyzer | sonnet | Device tree analysis for driver development |
 
 ### Disabling Agents
 
@@ -232,11 +230,8 @@ agent: coder-sonnet
 
 | Skill | Purpose |
 |-------|---------|
-| `/test` | Run test_all.zig with smart variant selection |
-| `/verify` | Build all variants and check for regressions |
-| `/symbolize <addr>` | Resolve kernel address to function name |
-| `/syscall` | Guided syscall addition workflow |
-| `/stack-check` | Analyze kernel stack usage patterns |
+| `/test` | Run cargo test with optional filtering |
+| `/check` | Run cargo check + clippy on all targets |
 
 ### Skill Hot-Reload
 
@@ -244,274 +239,344 @@ Skills in `.claude/skills/` are automatically discovered without restart. Edit o
 
 ---
 
-# PROJECT-LANGUAGE-SPECIFIC: Zig (v0.15.2)
-
-> **Freestanding kernel**: This is a bare-metal OS kernel. There are NO third-party libraries or package manager dependencies. All code is self-contained.
+# PROJECT-LANGUAGE-SPECIFIC: Rust (Edition 2021)
 
 ## Project Overview
 
-Laminae is a container-native research kernel for ARM (AArch64). Containers are first-class OS citizens - the kernel sees Container IDs, not PIDs. Each container owns a hardware-enforced slice of virtual address space with ASID-based isolation.
+Stratify is a structural engineering calculation application for wood and steel design. It provides:
 
-**Key principle**: We are not recreating Linux. This is a research platform exploring what a container-native kernel looks like without 30 years of process-model legacy.
+- **calc_core**: Core calculation library (beams, columns, materials, NDS factors, PDF generation)
+- **calc_gui**: Iced-based GUI application (native + WASM/WebGPU)
+- **calc_cli**: Ratatui-based terminal UI
+
+**Key principle**: Clean, LLM-friendly API. All types are JSON-serializable via serde for integration with AI assistants.
 
 ---
 
-## Zig Toolchain
+## Rust Toolchain
 
-- **Zig Version**: 0.15.2 (freestanding target)
-- **Target**: `aarch64-freestanding-none`
-- Build: `zig build` (see build options below)
-- Format: `zig fmt` (run before commits)
-- No external package manager - all code is self-contained
+- **Rust Edition**: 2021
+- **Targets**: Native (Windows/Mac/Linux) + WASM (wasm32-unknown-unknown)
+- **GUI**: Iced 0.14 with wgpu backend
+- **TUI**: Ratatui + crossterm
+- **PDF**: Typst integration
 
 ### Build Commands
 
 ```bash
+# Development build
+cargo build
 
-# Build with specific variant
-zig build -Dvariant=debug     # Debug build (default)
-zig build -Dvariant=fast      # ReleaseFast
-zig build -Dvariant=safe      # ReleaseSafe
-zig build -Dvariant=small     # ReleaseSmall
+# Release build
+cargo build --release
 
-# Test all kernel variants (regression testing)
-zig run scripts/test_all.zig -- --timeout=5000
+# Run GUI
+cargo run --bin calc_gui
+
+# Run CLI
+cargo run --bin calc_cli
+
+# Run tests
+cargo test
+
+# Check all targets (fast feedback)
+cargo check --all-targets
+
+# Clippy lints
+cargo clippy --all-targets -- -D warnings
+
+# Format code
+cargo fmt
+
+# WASM build (requires wasm-pack or trunk)
+cargo build --target wasm32-unknown-unknown -p calc_gui
 ```
-
-### Build Options
-
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `-Dvariant` | debug, fast, safe, small | debug | Kernel optimization level |
-| `-Dboot_target` | ci, interactive | ci | Boot target: ci (test_harness) or interactive (shell) |
-| `-Dearly_uart_debug` | true/false | false | Hardcoded UART in EL2 for early debugging |
 
 ---
 
 ## Architecture
 
-### Exception Levels
-
-- **EL2**: Initial boot, MMU setup, GIC/timer init, then transitions to EL1
-- **EL1**: Kernel core only - scheduler, syscall dispatch, memory management
-- **EL0**: All containers run here with hardware privilege separation
-
 ### Key Directories
 
-- `src/kernel/` - Kernel subsystems (container/, syscalls/, memory/, drivers/)
-- `src/kernel/syscalls/table.zig` - **THE source of truth** for all syscall definitions
-- `src/kernel/container/table.zig` - Container type definitions and capabilities
-- `src/shared/` - Code shared between kernel and user-space (compat/table.zig, icc/schema.zig)
-- `user/programs/` - User application containers
-- `user/drivers/` - Hardware driver containers (netd.zig, genetd.zig, blkd.zig)
-- `user/services/` - System services (lamina.zig orchestrator, shell.zig)
-- `user/liblaminae/` - **GENERATED** user-space library (syscall wrappers, net_api)
-
-### Source of Truth Architecture
-
-The kernel uses **table-driven code generation** to maintain consistency across the stack:
-
 ```
-src/kernel/syscalls/table.zig     ->  zig build gen-lib  ->  user/liblaminae/syscalls.zig
-src/kernel/container/table.zig    ->  zig build gen-docs ->  docs/api/syscalls.md
-src/shared/compat/table.zig       ->  (shared directly)
-src/shared/icc/schema.zig         ->  (shared directly)
+stratify/
+  calc_core/           # Core calculation library
+    src/
+      calculations/    # Beam, column, continuous beam analysis
+      equations/       # Documented statics formulas
+      materials/       # Material definitions (lumber, steel)
+      loads/           # Load types, ASCE 7 combinations
+      generated/       # Build-time generated data (materials from TOML)
+      pdf.rs           # PDF generation via Typst
+      project.rs       # Project container and metadata
+      file_io.rs       # Atomic file operations with locking
+  calc_gui/            # Iced GUI application
+    src/
+      ui/              # UI components (panels, modals, inputs)
+      update.rs        # Update checking logic
+  calc_cli/            # Ratatui TUI application
+  data/                # TOML data files for code generation
 ```
 
-**Critical**: When adding or modifying syscalls:
-1. Edit `src/kernel/syscalls/table.zig` (the spec array with name, num, args, etc.)
-2. Run `zig build gen-lib` to regenerate liblaminae syscall wrappers
-3. Run `zig build gen-docs` to regenerate API documentation
-4. The build system auto-runs `gen-lib` before compiling user programs
+### Design Principles
 
-**Never manually edit** `user/liblaminae/syscalls.zig` - it is overwritten on every build.
+- **Stateless calculations**: Pure functions that take input and return results
+- **JSON-first**: All types implement `Serialize`/`Deserialize`
+- **Rich errors**: Structured error types via `thiserror`, not strings
+- **Generated data**: Material databases generated at build time from TOML
 
 ---
 
-## Print System & Console Output
-
-- **EL2 (early boot)**: Use `uart.puts()` only - no `printz()`/`debugz()`
-- **EL1/EL0 (after MMU)**: Use `printz()` for production, `debugz()` for dev scaffolding
-
-```zig
-// EL2 - CORRECT (before MMU is active)
-uart.puts("MMU: ");
-uart.putDec(total_mb, null);
-
-// EL1/EL0 - CORRECT (after MMU is active)
-printz("Container {} ready\n", .{id});
-debugz("Debug info: {x}\n", .{addr});  // Stripped in production
-```
-
-### Global Primitives
-
-Access via `@import("root")`:
-- `barriers` - ARM memory barriers (dmb/dsb/isb)
-- `cache` - Cache operations
-- `printz`, `debugz`, `panicz` - Print functions
-
----
-
-## Zig Best Practices (Freestanding)
+## Rust Best Practices
 
 ### Error Handling
 
-```zig
-// Use error unions and try for propagation
-fn loadConfig(path: []const u8) !Config {
-    const file = try fs.open(path);
-    defer file.close();
-    return try parseConfig(file);
+```rust
+// Use thiserror for structured errors
+#[derive(Debug, thiserror::Error)]
+pub enum CalcError {
+    #[error("Invalid span: {0} must be positive")]
+    InvalidSpan(f64),
+    #[error("Material not found: {0}")]
+    MaterialNotFound(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
-// Explicit error sets for API boundaries
-const ConfigError = error{
-    FileNotFound,
-    ParseFailed,
-    InvalidFormat,
-};
-
-fn parseConfig(data: []const u8) ConfigError!Config {
+// Use Result<T, E> consistently
+pub fn analyze_beam(input: BeamInput) -> Result<BeamResult, CalcError> {
+    if input.span <= 0.0 {
+        return Err(CalcError::InvalidSpan(input.span));
+    }
     // ...
 }
+
+// Use ? for propagation
+pub fn load_and_analyze(path: &Path) -> Result<BeamResult, CalcError> {
+    let project = load_project(path)?;  // Propagates IO errors
+    let input = project.get_beam_input()?;
+    analyze_beam(input)
+}
 ```
 
-### Optional Handling
+### Option Handling
 
-```zig
-// Prefer if/orelse over .? when handling is needed
-if (items.get(index)) |item| {
-    // safe to use item
+```rust
+// Prefer match/if-let over .unwrap()
+if let Some(material) = materials.get(&name) {
+    // Use material
 } else {
-    // handle missing case
+    return Err(CalcError::MaterialNotFound(name));
 }
 
-// Use orelse for defaults
-const value = optional orelse default_value;
+// Use .unwrap_or_default() or .unwrap_or() for safe defaults
+let deflection_limit = config.deflection_limit.unwrap_or(360.0);
 
-// Use .? only when null is truly unexpected
-const ptr = maybe_ptr.?;  // Will panic if null - use sparingly
+// Use .ok_or() to convert Option to Result
+let material = materials.get(&name)
+    .ok_or_else(|| CalcError::MaterialNotFound(name.clone()))?;
 ```
 
-### Memory Safety
+### Struct Design
 
-```zig
-// Always use defer for cleanup
-const buffer = try allocator.alloc(u8, size);
-defer allocator.free(buffer);
-
-// Prefer slices over raw pointers
-fn process(data: []const u8) void { ... }
-
-// Use sentinel-terminated slices for C interop
-fn cString(s: [:0]const u8) [*:0]const u8 { return s.ptr; }
-```
-
-### ARM Discipline
-
-```zig
-// Use correct barriers after hardware register writes
-mmio.write(reg, value);
-barriers.dsb();  // Ensure write completes
-barriers.isb();  // Synchronize instruction stream
-
-// No hardcoded addresses - use DTB parsing or linker symbols
-const uart_base = dtb.getNodeProperty("uart", "reg") orelse
-    @extern([]const u8, .{ .name = "__uart_base" });
-```
-
-### Comptime & Generics
-
-```zig
-// Use comptime for zero-cost abstractions
-fn Register(comptime offset: usize) type {
-    return struct {
-        pub fn read() u32 {
-            return @as(*volatile u32, @ptrFromInt(base + offset)).*;
-        }
-        pub fn write(value: u32) void {
-            @as(*volatile u32, @ptrFromInt(base + offset)).* = value;
-        }
-    };
+```rust
+// Use derive macros consistently
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BeamInput {
+    pub span: f64,           // feet
+    pub width: f64,          // inches
+    pub depth: f64,          // inches
+    pub material: Material,
+    pub loads: Vec<LoadCase>,
 }
 
-// Prefer comptime assertions over runtime checks
-comptime {
-    if (@sizeOf(PageTable) != 4096) {
-        @compileError("PageTable must be exactly 4KB");
+// Use builder pattern for complex construction
+impl BeamInput {
+    pub fn new(span: f64, width: f64, depth: f64) -> Self {
+        Self {
+            span,
+            width,
+            depth,
+            material: Material::default(),
+            loads: Vec::new(),
+        }
+    }
+
+    pub fn with_material(mut self, material: Material) -> Self {
+        self.material = material;
+        self
     }
 }
 ```
 
-### Inline Assembly (ARM64)
+### Module Organization
 
-```zig
-// Use asm for system register access
-fn readSCTLR() u64 {
-    return asm volatile ("mrs %[ret], sctlr_el1"
-        : [ret] "=r" (-> u64)
-    );
-}
+```rust
+// In mod.rs or lib.rs - re-export public API
+pub mod calculations;
+pub mod materials;
 
-// Memory barriers
-fn dsb() void {
-    asm volatile ("dsb sy" ::: "memory");
+// Re-export commonly used types at crate root
+pub use calculations::{BeamResult, ColumnResult};
+pub use materials::Material;
+
+// Keep internal helpers private
+mod internal_utils;  // Not `pub mod`
+```
+
+### Iterators and Closures
+
+```rust
+// Prefer iterator chains over manual loops
+let max_moment = load_cases.iter()
+    .map(|lc| calculate_moment(lc, span))
+    .fold(0.0, f64::max);
+
+// Use collect with turbofish for type inference
+let valid_loads: Vec<_> = loads.iter()
+    .filter(|l| l.magnitude > 0.0)
+    .collect();
+
+// Use for loops when side effects are needed
+for load in &mut loads {
+    load.apply_factor(factor);
 }
 ```
 
-### Packed Structs for Hardware
+### Testing
 
-```zig
-// Use packed structs for MMIO registers
-const UartFlags = packed struct(u32) {
-    cts: bool,
-    dsr: bool,
-    dcd: bool,
-    busy: bool,
-    rxfe: bool,  // RX FIFO empty
-    txff: bool,  // TX FIFO full
-    rxff: bool,  // RX FIFO full
-    txfe: bool,  // TX FIFO empty
-    _reserved: u24 = 0,
-};
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-// Read as structured data
-const flags: UartFlags = @bitCast(mmio.read(UART_FR));
-if (flags.txff) {
-    // TX FIFO is full, wait
+    #[test]
+    fn test_beam_moment_simple_span() {
+        let input = BeamInput::new(10.0, 3.5, 9.25);
+        let result = analyze_beam(input).unwrap();
+
+        // Use approx comparisons for floats
+        assert!((result.max_moment - 12500.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_invalid_span_returns_error() {
+        let input = BeamInput::new(-5.0, 3.5, 9.25);
+        assert!(matches!(
+            analyze_beam(input),
+            Err(CalcError::InvalidSpan(_))
+        ));
+    }
+}
+```
+
+### Documentation
+
+```rust
+/// Analyzes a simply-supported beam under the given loads.
+///
+/// # Arguments
+///
+/// * `input` - Beam geometry, material, and load cases
+///
+/// # Returns
+///
+/// Beam analysis results including moments, shears, and deflections.
+///
+/// # Errors
+///
+/// Returns `CalcError::InvalidSpan` if span is not positive.
+///
+/// # Example
+///
+/// ```
+/// let input = BeamInput::new(12.0, 3.5, 11.25);
+/// let result = analyze_beam(input)?;
+/// println!("Max moment: {} lb-ft", result.max_moment);
+/// ```
+pub fn analyze_beam(input: BeamInput) -> Result<BeamResult, CalcError> {
+    // ...
 }
 ```
 
 ---
 
-## Testing Philosophy: Diagnostics, Not Verdicts
+## GUI Development (Iced)
 
-**Tests are diagnostic tools, not success criteria.** A passing test suite does not mean the kernel is good. A failing test does not mean the code is wrong.
+### Message Pattern
 
-**When a test fails, ask three questions in order:**
-1. Is the test itself correct and valuable?
-2. Does the test align with our current design vision?
-3. Is the code actually broken?
+```rust
+#[derive(Debug, Clone)]
+pub enum Message {
+    // User actions
+    SpanChanged(String),
+    MaterialSelected(Material),
+    Calculate,
 
-Only if all three answers are "yes" should you fix the code.
+    // Async results
+    CalculationComplete(Result<BeamResult, CalcError>),
+    UpdateCheckComplete(Option<Version>),
+}
 
-**Why this matters:**
-- Tests encode assumptions. Assumptions can be wrong or outdated.
-- Changing code to pass a bad test makes the codebase worse, not better.
-- A research OS explores new territory - legacy testing assumptions don't always apply.
+fn update(&mut self, message: Message) -> Command<Message> {
+    match message {
+        Message::SpanChanged(s) => {
+            self.span_input = s;
+            Command::none()
+        }
+        Message::Calculate => {
+            let input = self.build_input();
+            Command::perform(
+                async move { analyze_beam(input) },
+                Message::CalculationComplete
+            )
+        }
+        // ...
+    }
+}
+```
 
-**What tests ARE good for:**
-- **Regression detection**: Did a scheduler refactor break ICC? Did memory changes break container isolation?
-- **Sanity checks**: Does boot complete? Do syscalls return? Does the happy path work?
-- **Behavior documentation**: Tests show what the code currently does, not necessarily what it should do.
+### View Composition
 
-**What tests are NOT:**
-- A definition of correctness
-- A measure of kernel quality
-- Something to "make pass" at all costs
-- A specification to code against
+```rust
+fn view(&self) -> Element<Message> {
+    let content = column![
+        self.view_toolbar(),
+        row![
+            self.view_input_panel(),
+            self.view_results_panel(),
+        ],
+        self.view_status_bar(),
+    ];
 
-**The real success metric**: Does the kernel further our vision of a container-native OS that developers and LLMs love to work with?
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+```
+
+---
+
+## WASM Considerations
+
+```rust
+// Use cfg attributes for platform-specific code
+#[cfg(not(target_arch = "wasm32"))]
+fn save_file(path: &Path, data: &[u8]) -> io::Result<()> {
+    fs::write(path, data)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_file(_path: &Path, data: &[u8]) -> io::Result<()> {
+    // Use web-sys to trigger browser download
+    trigger_download(data)
+}
+
+// fs2 (file locking) is native-only
+#[cfg(not(target_arch = "wasm32"))]
+use fs2::FileExt;
+```
 
 ---
 
@@ -520,245 +585,97 @@ Only if all three answers are "yes" should you fix the code.
 ### Test Commands
 
 ```bash
-# Single variant with timeout (quick iteration)
-zig build run-timeout -Dtimeout=10000
+# Run all tests
+cargo test
 
-# All variants with timeout (CI/regression testing)
-zig run scripts/test_all.zig -- --timeout=10000
+# Run tests with output
+cargo test -- --nocapture
 
-# Verbose mode for debugging boot issues
-zig run scripts/test_all.zig -- --timeout=10000 --verbose
+# Run specific test
+cargo test test_beam_moment
+
+# Run tests in specific crate
+cargo test -p calc_core
+
+# Run ignored (slow) tests
+cargo test -- --ignored
 ```
 
-### Filtering Test Output (Windows)
+### Test Organization
 
-QEMU produces verbose output. Filter to find relevant information:
-
-```powershell
-# Run and filter for specific patterns
-zig build run-timeout -Dtimeout=10000 2>&1 | Select-String -Pattern "ERROR|PANIC|OK"
-
-# Filter for smoke tokens only
-zig build run-timeout -Dtimeout=10000 2>&1 | Select-String -Pattern "\[.*_OK\]"
-
-# Filter for a specific subsystem
-zig build run-timeout -Dtimeout=10000 2>&1 | Select-String -Pattern "ASID|TLB|container"
-
-# Save full output and filter separately
-zig build run-timeout -Dtimeout=10000 2>&1 | Out-File qemu-output.txt
-Select-String -Path qemu-output.txt -Pattern "fault|abort" -Context 5,5
-```
-
-### Test Patterns
-
-- Use `user/programs/` for integration test containers
-
-### Smoke Token System
-
-Tests emit tokens like `[BOOT_OK]`, `[SCHED_OK]`, `[NET_OK]`. The `test_all.zig` script captures and validates these across variants.
-
-| Token | Meaning |
-|-------|---------|
-| `[BOOT_OK]` | Kernel booted successfully (required) |
-| `[SCHED_OK]` | Scheduler initialized (required) |
-| `[MMU_OK]` | MMU enabled correctly |
-| `[NET_OK]` | Network stack initialized |
-| `[HTTP_OK]` | HTTP test passed |
-| `[BUILD_OK]` | Build system test passed |
-
-Regression = missing previously-seen tokens across variants.
+- Unit tests go in the same file as the code (`#[cfg(test)] mod tests`)
+- Integration tests go in `tests/` directory
+- Use `proptest` or `quickcheck` for property-based testing when appropriate
 
 ---
 
 ## Common Development Workflows
 
-### Adding a New Syscall
+### Adding a New Calculation Type
 
-1. **Define in table**: Edit `src/kernel/syscalls/table.zig`
-   - Add SyscallSpec to `table` array
-   - Choose number in category range:
-     - Core: 100-119
-     - ICC: 120-139
-     - Memory: 140-159
-     - Device: 160-179
-     - Block: 180-199
-     - Network: 200-219
-     - Filesystem: 220-239
-   - Define args (max 6 per ARM64 ABI), return type, error set, capabilities
+1. **Define types** in `calc_core/src/calculations/`
+   - Input struct with `Serialize`/`Deserialize`
+   - Result struct with calculated values
+   - Error variants if needed
 
-2. **Implement handler**: Add to appropriate file
-   - Core: `src/kernel/syscalls/core.zig`
-   - ICC: `src/kernel/icc/handlers.zig`
-   - Device: `src/kernel/syscalls/device.zig`
+2. **Implement calculation** as pure function
+   - Take input, return `Result<Output, CalcError>`
+   - No side effects, no global state
 
-3. **Wire dispatch**: Update `src/kernel/syscalls/dispatch.zig`
-   - Add case to category-specific dispatch function
+3. **Add tests** in same file or `tests/`
 
-4. **Regenerate and verify**:
-   ```bash
-   zig build gen-lib && zig build gen-docs
-   zig run scripts/test_all.zig -- --timeout=10000
-   ```
+4. **Wire up GUI** in `calc_gui/src/ui/`
+   - Input panel component
+   - Results panel component
+   - Message variants for user actions
 
-### Adding a New Container Type
+5. **Export from lib.rs** if public API
 
-1. Edit `src/kernel/container/table.zig`
-   - Add ContainerTypeSpec to `type_table`
-   - Define capabilities, exception level, page table template
+### Adding a New Material
 
-2. Run `zig build gen-docs` to update documentation
-
-3. Add spawn logic if needed in `user/services/lamina.zig`
-
-### Stack Budget Reference
-
-| Component | Size | Notes |
-|-----------|------|-------|
-| Exception frame | 288 bytes | Lazy SIMD (was 800) |
-| Kernel stack | 32KB | Per container (was 128KB) |
-| Nested syscall margin | 3x | Budget ~928 bytes worst-case |
+1. Add entry to `data/materials.toml`
+2. Rebuild to regenerate `calc_core/src/generated/material_data.rs`
+3. Material is automatically available via `Material::lookup()`
 
 ---
 
-## Debugging Tools
-
-```bash
-# Address to symbol resolution
-llvm-objdump -d zig-out/bin/laminae-kernel-debug | grep <address>
-# OR
-llvm-symbolizer --obj=zig-out/bin/laminae-kernel-debug <address>
-
-# Memory inspection
-llvm-objdump -s --start-address=<start> --stop-address=<stop> zig-out/bin/laminae-kernel-debug
-```
-
----
-
-## Code Search Tools
-
-### ripgrep (rg) - Fast Text Search
-
-Use when searching for literal strings or regex patterns:
-
-```bash
-rg "unreachable" -t zig           # Find all unreachable statements
-rg "TODO|FIXME" -t zig            # Find todos
-rg "pub fn" src/                  # Find public functions
-rg -l "Container" -t zig          # List files containing pattern
-rg -n "inline fn" -t zig          # Show line numbers
-```
-
-### ast-grep - Structural Code Search
-
-Use when you need syntax-aware matching:
-
-```bash
-ast-grep run -l zig -p '$X.?'              # Find all optional unwraps
-ast-grep run -l zig -p '@panic($$$)'       # Find all panic calls
-ast-grep run -l zig -p 'fn $NAME() void'   # Find functions returning void
-```
-
-**When to use which:**
-- **ripgrep**: Quick searches, TODOs, config values, recon
-- **ast-grep**: Refactoring patterns, finding anti-patterns, policy checks
-
----
-
-## Development Scripts
-
-Scripts live in `scripts/`. Run with `zig run scripts/<name>.zig -- <args>`.
-
-Key scripts: `test_all.zig` (multi-variant testing), `gen_lib.zig` (syscall wrapper generation), `gen_docs.zig` (API docs).
-
----
-
-## Bug Severity (Zig Freestanding)
+## Bug Severity (Rust)
 
 ### Critical - Must Fix Immediately
 
-- `.?` on null (panics, crashes kernel)
-- `unreachable` reached at runtime
-- Index out of bounds on slices/arrays
-- Integer overflow in release builds (undefined behavior)
-- Use-after-free or double-free
-- Unaligned pointer access on ARM (data abort)
-- Missing memory barriers after MMIO writes (silent corruption)
-- Exception faults (data abort, instruction abort, undefined instruction)
-- Stack overflow (no guard pages in freestanding)
+- `.unwrap()` or `.expect()` on user input (panic in release)
+- Index out of bounds (`slice[i]` without bounds check)
+- Integer overflow in release builds
+- Deadlocks in async code
+- Memory leaks (though rare in Rust)
 
 ### Important - Fix Before Merge
 
-- Missing error handling (`try` without proper catch/return)
-- `catch unreachable` without justification comment
-- ASID/TLB invalidation omitted after page table changes
-- Volatile reads/writes missing for MMIO
-- Incorrect packed struct layout for hardware registers
-- Ignoring return values from functions returning `!T`
-- Memory leaks in long-running code paths
-- Race conditions in interrupt handlers
+- Missing error handling (using `.unwrap()` where `?` should be used)
+- Clippy warnings (especially `clippy::pedantic` findings)
+- Inconsistent public API (missing `pub` or wrong visibility)
+- Missing documentation on public items
+- Non-idiomatic code patterns
 
 ### Contextual - Address When Convenient
 
 - TODO/FIXME comments
-- Unused imports or variables
-- Suboptimal comptime usage (could be comptime but isn't)
-- Redundant code that could use generics
-- Missing `inline` on hot path functions
-- Excessive debug output left in code
+- Unused imports or variables (compiler warns)
+- Suboptimal iterator usage
+- Missing `#[must_use]` on functions returning Result
 
 ---
 
 ## Development Philosophy
 
-**Make it work, make it right, make it fast** - in that order. Use extensive `debugz()` output during development, strip aggressively once working.
+**Make it work, make it right, make it fast** - in that order.
 
-**Closed-Loop Testing**: Build testable systems independently. Use `zig build run-timeout -Dtimeout=5000` for verification.
+- Use `dbg!()` macro during development, remove before commit
+- Run `cargo clippy` before every commit
+- Run `cargo fmt` to maintain consistent style
+- Keep dependencies minimal - prefer std library when possible
 
-**No Hardcoded Values**: Use DTB parsing or linker symbols, not magic addresses.
-
----
-
-## Linux Inspiration vs. Recreation
-
-**We are not recreating Linux** - but we also do not reinvent the wheel. Take inspiration from proven patterns.
-
-### What We Borrow (Standard ARM64 Patterns)
-
-These are industry-standard patterns that Linux implements well. Use them:
-
-| Pattern | Linux Reference | Our Usage |
-|---------|-----------------|-----------|
-| ARM64 ABI | syscall in x8, args x0-x5 | Same - it's the ARM spec |
-| Safe copy | `copy_to_user` fault recovery | `src/kernel/syscalls/uaccess.zig` |
-| Memory barriers | dmb/dsb/isb sequences | `src/arch/aarch64/common/barriers.zig` |
-| MAIR_EL1 | Memory attribute config | Standard ARM setup |
-| ASID | TLB isolation | Per-container isolation |
-| GICv2 | Interrupt controller | `src/kernel/drivers/gic/v2.zig` |
-| PL011 UART | Serial driver | `src/kernel/drivers/uart/pl011.zig` |
-| DTB parsing | Flattened Device Tree | `src/kernel/fdt.zig` |
-| Page tables | 4-level, 4KB granules | `src/kernel/container/page_tables.zig` |
-
-### Where We Diverge (Container-Native Design)
-
-These are deliberate architectural differences:
-
-| Linux Approach | Laminae Approach | Rationale |
-|----------------|------------------|-----------|
-| Process model (PIDs) | Container model (CIDs) | Containers are first-class citizens |
-| Copy-on-Write | Deep copy page tables | Simplicity over optimization |
-| POSIX compatibility | Clean-slate syscalls | No 30 years of legacy |
-| Per-process ASID | Per-container ASID | Direct hardware isolation mapping |
-| Monolithic + modules | Microkernel-ish | Drivers in EL0 containers |
-
-### When to Look at Linux
-
-- **DO**: Reference `arch/arm64/` for ARM system register setup, barrier sequences, exception handling patterns
-- **DO**: Study driver register definitions and initialization sequences
-- **DO**: Learn from their TLB invalidation and cache management code
-- **DON'T**: Copy their process/thread model, scheduler complexity, or POSIX shims
-- **DON'T**: Add compatibility layers to match Linux behavior
-
-**The goal**: A modern kernel that a Linux ARM64 developer would recognize at the hardware level, but find refreshingly simple at the OS level.
+**The goal**: A clean, well-documented calculation library that both humans and LLMs can understand and extend.
 
 ---
 
