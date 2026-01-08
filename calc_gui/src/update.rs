@@ -10,8 +10,8 @@ use serde::Deserialize;
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// GitHub repository for release checks
-const GITHUB_OWNER: &str = "hotschmoe";
-const GITHUB_REPO: &str = "Stratify";
+const GITHUB_OWNER: &str = "Hotschmoe";
+const GITHUB_REPO: &str = "stratify";
 
 /// Information about an available update
 #[derive(Debug, Clone)]
