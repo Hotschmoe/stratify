@@ -359,6 +359,33 @@ trunk build --release
 ./target/release/calc_cli
 ```
 
+## Releasing
+
+Releases are automated via GitHub Actions. The workflow builds native binaries for all platforms, creates a WASM build, and deploys to GitHub Pages.
+
+### Creating a Release
+
+```bash
+# Tag and push (triggers build + deploy)
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+### What Gets Built
+
+| Target | Artifact | Notes |
+|--------|----------|-------|
+| `x86_64-unknown-linux-gnu` | `calc_gui-*.tar.gz` | Linux x64 |
+| `x86_64-pc-windows-msvc` | `calc_gui-*.zip` | Windows x64 |
+| `x86_64-apple-darwin` | `calc_gui-*.tar.gz` | macOS Intel |
+| `aarch64-apple-darwin` | `calc_gui-*.tar.gz` | macOS Apple Silicon |
+| `wasm32-unknown-unknown` | GitHub Pages | Browser app at `/<repo>/` |
+
+### Release Artifacts
+
+- **GitHub Releases**: Native binaries attached to the release
+- **GitHub Pages**: WASM build deployed automatically (live at repo URL)
+
 ## Development Philosophy
 
 ### Design Principles
