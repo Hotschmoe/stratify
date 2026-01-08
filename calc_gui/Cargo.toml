@@ -29,6 +29,8 @@ semver = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WASM: use only wgpu with WebGPU (no tiny-skia to avoid canvas context conflict)
 iced = { version = "0.14", default-features = false, features = ["wgpu", "canvas", "web-colors"] }
+# getrandom needs wasm_js feature for WASM builds (transitive dep from uuid/iced)
+getrandom = { version = "0.3", features = ["wasm_js"] }
 # WASM-only dependencies - for better error reporting
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
