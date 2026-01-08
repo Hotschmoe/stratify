@@ -32,6 +32,9 @@ use calc_core::project::Project;
 
 mod ui;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod update;
+
 use ui::modal::{ModalType, PendingAction};
 
 // ============================================================================
@@ -475,6 +478,25 @@ pub struct App {
 
     // Results panel tabs
     pub selected_results_tab: ResultsTab,
+
+    // Update checker (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub update_status: UpdateStatus,
+}
+
+/// Status of the update checker
+#[derive(Debug, Clone, Default)]
+pub enum UpdateStatus {
+    #[default]
+    NotChecked,
+    Checking,
+    UpToDate,
+    UpdateAvailable {
+        version: String,
+        download_url: String,
+        html_url: String,
+    },
+    Failed(String),
 }
 
 impl Default for App {
@@ -561,13 +583,24 @@ impl Default for App {
             drag_start_value: 0.0,
             selected_input_tab: InputTab::default(),
             selected_results_tab: ResultsTab::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            update_status: UpdateStatus::default(),
         }
     }
 }
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        (Self::default(), Task::none())
+        let app = Self::default();
+
+        // On native, start background update check
+        #[cfg(not(target_arch = "wasm32"))]
+        let task = Task::perform(update::check_for_updates(), Message::UpdateCheckComplete);
+
+        #[cfg(target_arch = "wasm32")]
+        let task = Task::none();
+
+        (app, task)
     }
 
     fn theme(&self) -> Theme {
@@ -716,6 +749,14 @@ pub enum Message {
     FileOpenComplete(Result<(String, Vec<u8>), String>),
     FileSaveComplete(Result<String, String>),
     PdfExportComplete(Result<String, String>),
+
+    // Update checking (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    CheckForUpdates,
+    #[cfg(not(target_arch = "wasm32"))]
+    UpdateCheckComplete(update::UpdateCheckResult),
+    #[cfg(not(target_arch = "wasm32"))]
+    OpenUpdateUrl(String),
 }
 
 // ============================================================================
@@ -1263,6 +1304,41 @@ impl App {
                         }
                     }
                 }
+            }
+
+            // Update checking (native only)
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::CheckForUpdates => {
+                self.update_status = UpdateStatus::Checking;
+                self.status = "Checking for updates...".to_string();
+                return Task::perform(update::check_for_updates(), Message::UpdateCheckComplete);
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::UpdateCheckComplete(result) => {
+                match result {
+                    update::UpdateCheckResult::UpdateAvailable(info) => {
+                        self.update_status = UpdateStatus::UpdateAvailable {
+                            version: info.version.clone(),
+                            download_url: info.download_url,
+                            html_url: info.html_url,
+                        };
+                        self.status = format!("Update available: v{}", info.version);
+                    }
+                    update::UpdateCheckResult::UpToDate => {
+                        self.update_status = UpdateStatus::UpToDate;
+                        self.status = format!("Up to date (v{})", update::CURRENT_VERSION);
+                    }
+                    update::UpdateCheckResult::Failed(msg) => {
+                        self.update_status = UpdateStatus::Failed(msg.clone());
+                        self.status = format!("Update check failed: {}", msg);
+                    }
+                }
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OpenUpdateUrl(url) => {
+                update::open_url(&url);
             }
         }
         Task::none()
@@ -1968,7 +2044,12 @@ impl App {
             // The padding should align with the toolbar settings button
             // Toolbar is ~30px high + padding
             // We'll use a container aligned to top-right with padding
-            let overlay = container(ui::toolbar::view_settings_menu(self.dark_mode))
+            #[cfg(not(target_arch = "wasm32"))]
+            let settings_menu = ui::toolbar::view_settings_menu(self.dark_mode, &self.update_status);
+            #[cfg(target_arch = "wasm32")]
+            let settings_menu = ui::toolbar::view_settings_menu(self.dark_mode);
+
+            let overlay = container(settings_menu)
                 .padding(iced::Padding {
                     top: 50.0,
                     right: 15.0,

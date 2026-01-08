@@ -36,6 +36,10 @@ fs2 = "0.4"
 # Getrandom with js feature for WASM support
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+# Update checking (native only)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+semver = "1.0"
+
 # Asset embedding
 rust-embed = "8.0"
 

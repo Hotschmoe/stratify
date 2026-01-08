@@ -22,6 +22,9 @@ whoami = "1.5"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native: use both wgpu and tiny-skia (fallback)
 iced = { version = "0.14", features = ["wgpu", "tokio", "canvas"] }
+# Update checking (native only - WASM users just refresh the page)
+reqwest = { workspace = true }
+semver = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WASM: use only wgpu with WebGPU (no tiny-skia to avoid canvas context conflict)
