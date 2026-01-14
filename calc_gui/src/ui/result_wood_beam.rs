@@ -99,26 +99,29 @@ fn view_calculation_results<'a>(input: &'a ContinuousBeamInput, result: &'a Cont
     // Get first span result for detailed stress checks (single-span case)
     let span_result = result.span_results.first();
 
-    let (bending_status, bending_unity, actual_fb, allowable_fb) = span_result
-        .map(|sr| {
+    let (bending_status, bending_unity, actual_fb, allowable_fb) = match span_result {
+        Some(sr) => {
             let status = if sr.bending_unity <= 1.0 { "OK" } else { "FAIL" };
             (status, sr.bending_unity, sr.actual_fb_psi, sr.allowable_fb_psi)
-        })
-        .unwrap_or(("N/A", 0.0, 0.0, 0.0));
+        }
+        None => ("N/A", 0.0, 0.0, 0.0),
+    };
 
-    let (shear_status, shear_unity, actual_fv, allowable_fv) = span_result
-        .map(|sr| {
+    let (shear_status, shear_unity, actual_fv, allowable_fv) = match span_result {
+        Some(sr) => {
             let status = if sr.shear_unity <= 1.0 { "OK" } else { "FAIL" };
             (status, sr.shear_unity, sr.actual_fv_psi, sr.allowable_fv_psi)
-        })
-        .unwrap_or(("N/A", 0.0, 0.0, 0.0));
+        }
+        None => ("N/A", 0.0, 0.0, 0.0),
+    };
 
-    let (defl_status, defl_unity) = span_result
-        .map(|sr| {
+    let (defl_status, defl_unity) = match span_result {
+        Some(sr) => {
             let status = if sr.deflection_unity <= 1.0 { "OK" } else { "FAIL" };
             (status, sr.deflection_unity)
-        })
-        .unwrap_or(("N/A", 0.0));
+        }
+        None => ("N/A", 0.0),
+    };
 
     // Build reactions display string (R_1, R_2, R_3, etc.)
     let reactions_str = result.reactions

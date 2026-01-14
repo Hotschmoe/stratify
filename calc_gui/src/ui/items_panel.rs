@@ -125,19 +125,16 @@ pub fn view_items_panel<'a>(
             for (id, item) in &project.items {
                 if let CalculationItem::Beam(beam) = item {
                     let is_selected = selected_beam_id == Some(*id);
-                    let btn = if is_selected {
-                        button(text(&beam.label).size(10))
-                            .on_press(Message::SelectBeam(*id))
-                            .padding(Padding::from([3, 6]))
-                            .style(button::primary)
-                            .width(Length::Fill)
+                    let style = if is_selected {
+                        button::primary
                     } else {
-                        button(text(&beam.label).size(10))
-                            .on_press(Message::SelectBeam(*id))
-                            .padding(Padding::from([3, 6]))
-                            .style(button::secondary)
-                            .width(Length::Fill)
+                        button::secondary
                     };
+                    let btn = button(text(&beam.label).size(10))
+                        .on_press(Message::SelectBeam(*id))
+                        .padding(Padding::from([3, 6]))
+                        .style(style)
+                        .width(Length::Fill);
                     beams_list = beams_list.push(btn);
                 }
             }

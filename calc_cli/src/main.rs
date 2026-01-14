@@ -14,6 +14,20 @@ use calc_core::calculations::beam::{calculate, BeamInput};
 use calc_core::loads::{DesignMethod, DiscreteLoad, EnhancedLoadCase, LoadType};
 use calc_core::materials::{Material, WoodGrade, WoodMaterial, WoodSpecies};
 
+fn prompt_f64(prompt: &str, default: f64) -> f64 {
+    print!("{}", prompt);
+    if io::stdout().flush().is_err() {
+        return default;
+    }
+
+    let mut input = String::new();
+    if io::stdin().lock().read_line(&mut input).is_err() {
+        return default;
+    }
+
+    input.trim().parse().unwrap_or(default)
+}
+
 fn main() {
     println!("Stratify CLI - Structural Engineering Calculator");
     println!("================================================");
@@ -21,21 +35,8 @@ fn main() {
     println!("TUI not yet implemented. Running simple CLI demo...");
     println!();
 
-    // Simple interactive demo
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-
-    print!("Enter beam span (ft) [12.0]: ");
-    stdout.flush().unwrap();
-    let mut span_input = String::new();
-    stdin.lock().read_line(&mut span_input).unwrap();
-    let span_ft: f64 = span_input.trim().parse().unwrap_or(12.0);
-
-    print!("Enter uniform load (plf) [100.0]: ");
-    stdout.flush().unwrap();
-    let mut load_input = String::new();
-    stdin.lock().read_line(&mut load_input).unwrap();
-    let load_plf: f64 = load_input.trim().parse().unwrap_or(100.0);
+    let span_ft = prompt_f64("Enter beam span (ft) [12.0]: ", 12.0);
+    let load_plf = prompt_f64("Enter uniform load (plf) [100.0]: ", 100.0);
 
     println!();
     println!("Calculating 2x10 DF-L No.2 beam...");
@@ -105,16 +106,19 @@ fn main() {
             );
             println!("═══════════════════════════════════════");
 
-            // Output JSON for LLM consumption
             println!();
             println!("JSON Output (for LLM/API use):");
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            if let Ok(json) = serde_json::to_string_pretty(&result) {
+                println!("{}", json);
+            }
         }
         Err(e) => {
             eprintln!("Error: {}", e);
-            eprintln!();
-            eprintln!("Error JSON:");
-            eprintln!("{}", serde_json::to_string_pretty(&e).unwrap());
+            if let Ok(json) = serde_json::to_string_pretty(&e) {
+                eprintln!();
+                eprintln!("Error JSON:");
+                eprintln!("{}", json);
+            }
         }
     }
 }

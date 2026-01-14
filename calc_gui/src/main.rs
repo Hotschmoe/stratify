@@ -338,17 +338,36 @@ impl LoadTableRow {
 
     fn from_discrete_load(load: &DiscreteLoad) -> Self {
         let (distribution, position, start_ft, end_ft) = match &load.distribution {
-            LoadDistribution::UniformFull => {
-                (DistributionType::UniformFull, String::new(), String::new(), String::new())
-            }
-            LoadDistribution::Point { position_ft } => {
-                (DistributionType::Point, position_ft.to_string(), String::new(), String::new())
-            }
-            LoadDistribution::UniformPartial { start_ft, end_ft } => {
-                (DistributionType::UniformPartial, String::new(), start_ft.to_string(), end_ft.to_string())
-            }
-            _ => (DistributionType::UniformFull, String::new(), String::new(), String::new()),
+            LoadDistribution::UniformFull => (
+                DistributionType::UniformFull,
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+            LoadDistribution::Point { position_ft } => (
+                DistributionType::Point,
+                position_ft.to_string(),
+                String::new(),
+                String::new(),
+            ),
+            LoadDistribution::UniformPartial { start_ft, end_ft } => (
+                DistributionType::UniformPartial,
+                String::new(),
+                start_ft.to_string(),
+                end_ft.to_string(),
+            ),
+            _ => (
+                DistributionType::UniformFull,
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
         };
+
+        let tributary_width = load
+            .tributary_width_ft
+            .map(|t| t.to_string())
+            .unwrap_or_default();
 
         Self {
             id: load.id,
@@ -358,9 +377,7 @@ impl LoadTableRow {
             position,
             start_ft,
             end_ft,
-            tributary_width: load.tributary_width_ft
-                .map(|t| t.to_string())
-                .unwrap_or_default(),
+            tributary_width,
         }
     }
 }
@@ -370,6 +387,15 @@ const BERKELEY_MONO: &[u8] =
     include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Regular.otf");
 const BERKELEY_MONO_BOLD: &[u8] =
     include_bytes!("../../assets/fonts/BerkleyMono/BerkeleyMono-Bold.otf");
+
+/// Convert a positive f64 to String, or return empty string if zero or negative
+fn positive_or_empty(value: f64) -> String {
+    if value > 0.0 {
+        value.to_string()
+    } else {
+        String::new()
+    }
+}
 
 fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
@@ -604,7 +630,11 @@ impl App {
     }
 
     fn theme(&self) -> Theme {
-        if self.dark_mode { Theme::Dark } else { Theme::Light }
+        if self.dark_mode {
+            Theme::Dark
+        } else {
+            Theme::Light
+        }
     }
 
     fn window_title(&self) -> String {
@@ -629,6 +659,68 @@ impl App {
         match self.selection {
             EditorSelection::Beam(Some(id)) => Some(id),
             _ => None,
+        }
+    }
+
+    /// Build Material from current UI selections, if valid
+    fn build_material(&self) -> Option<Material> {
+        match self.selected_material_type {
+            MaterialType::SawnLumber => {
+                let species = self.selected_species?;
+                let grade = self.selected_grade?;
+                Some(Material::SawnLumber(WoodMaterial::new(species, grade)))
+            }
+            MaterialType::Glulam => {
+                let stress_class = self.selected_glulam_class?;
+                let layup = self.selected_glulam_layup?;
+                Some(Material::Glulam(GlulamMaterial::new(stress_class, layup)))
+            }
+            MaterialType::Lvl => {
+                let grade = self.selected_lvl_grade?;
+                Some(Material::Lvl(LvlMaterial::new(grade)))
+            }
+            MaterialType::Psl => {
+                let grade = self.selected_psl_grade?;
+                Some(Material::Psl(PslMaterial::new(grade)))
+            }
+        }
+    }
+
+    /// Build AdjustmentFactors from current UI selections
+    fn build_adjustment_factors(&self) -> AdjustmentFactors {
+        AdjustmentFactors {
+            load_duration: self.selected_load_duration,
+            wet_service: self.selected_wet_service,
+            temperature: self.selected_temperature,
+            incising: self.selected_incising,
+            repetitive_member: self.selected_repetitive_member,
+            flat_use: self.selected_flat_use,
+            compression_edge_braced: self.compression_edge_braced,
+            unbraced_length_in: None,
+        }
+    }
+
+    /// Build SectionDeductions from current UI selections
+    fn build_section_deductions(&self) -> SectionDeductions {
+        SectionDeductions {
+            notch_location: self.selected_notch_location,
+            notch_depth_left_in: self.notch_depth_left.parse().unwrap_or(0.0),
+            notch_depth_right_in: self.notch_depth_right.parse().unwrap_or(0.0),
+            hole_diameter_in: self.hole_diameter.parse().unwrap_or(0.0),
+            hole_count: self.hole_count.parse().unwrap_or(0),
+        }
+    }
+
+    /// Calculate total beam length from span table (for multi-span) or single span
+    fn total_beam_length(&self, single_span_ft: f64) -> f64 {
+        if self.multi_span_mode && self.span_table.len() > 1 {
+            self.span_table
+                .iter()
+                .filter_map(|s| s.length_ft.parse::<f64>().ok())
+                .filter(|&v| v > 0.0)
+                .sum()
+        } else {
+            single_span_ft
         }
     }
 }
@@ -840,9 +932,9 @@ impl App {
             }
 
             Message::ToggleSection(section) => {
-                if self.collapsed_sections.contains(&section) {
-                    self.collapsed_sections.remove(&section);
-                } else {
+                // HashSet::insert returns false if already present, so we can use
+                // remove-then-insert pattern. However, toggle is clearer here.
+                if !self.collapsed_sections.remove(&section) {
                     self.collapsed_sections.insert(section);
                 }
             }
@@ -1595,18 +1687,14 @@ impl App {
                 self.right_end_support = beam.supports.last().copied().unwrap_or(SupportType::Roller);
 
                 self.selected_notch_location = beam.section_deductions.notch_location;
-                self.notch_depth_left = if beam.section_deductions.notch_depth_left_in > 0.0 {
-                    beam.section_deductions.notch_depth_left_in.to_string()
-                } else { String::new() };
-                self.notch_depth_right = if beam.section_deductions.notch_depth_right_in > 0.0 {
-                    beam.section_deductions.notch_depth_right_in.to_string()
-                } else { String::new() };
-                self.hole_diameter = if beam.section_deductions.hole_diameter_in > 0.0 {
-                    beam.section_deductions.hole_diameter_in.to_string()
-                } else { String::new() };
+                self.notch_depth_left = positive_or_empty(beam.section_deductions.notch_depth_left_in);
+                self.notch_depth_right = positive_or_empty(beam.section_deductions.notch_depth_right_in);
+                self.hole_diameter = positive_or_empty(beam.section_deductions.hole_diameter_in);
                 self.hole_count = if beam.section_deductions.hole_count > 0 {
                     beam.section_deductions.hole_count.to_string()
-                } else { String::new() };
+                } else {
+                    String::new()
+                };
 
                 self.error_message = None;
                 self.status = format!("Selected: {}", beam.label);
@@ -1666,7 +1754,9 @@ impl App {
     }
 
     fn auto_save_beam(&mut self) {
-        if !self.can_edit() { return; }
+        if !self.can_edit() {
+            return;
+        }
 
         let beam_id = match self.selection {
             EditorSelection::Beam(Some(id)) => id,
@@ -1677,16 +1767,6 @@ impl App {
             Ok(v) if v > 0.0 => v,
             _ => return,
         };
-
-        // Calculate total beam length for load positioning
-        let total_length_ft = if self.multi_span_mode && self.span_table.len() > 1 {
-            self.span_table.iter()
-                .filter_map(|s| s.length_ft.parse::<f64>().ok())
-                .filter(|&v| v > 0.0)
-                .sum()
-        } else {
-            span_ft
-        };
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
             _ => return,
@@ -1696,33 +1776,12 @@ impl App {
             _ => return,
         };
 
-        let material = match self.selected_material_type {
-            MaterialType::SawnLumber => {
-                match (self.selected_species, self.selected_grade) {
-                    (Some(species), Some(grade)) => Material::SawnLumber(WoodMaterial::new(species, grade)),
-                    _ => return,
-                }
-            }
-            MaterialType::Glulam => {
-                match (self.selected_glulam_class, self.selected_glulam_layup) {
-                    (Some(stress_class), Some(layup)) => Material::Glulam(GlulamMaterial::new(stress_class, layup)),
-                    _ => return,
-                }
-            }
-            MaterialType::Lvl => {
-                match self.selected_lvl_grade {
-                    Some(grade) => Material::Lvl(LvlMaterial::new(grade)),
-                    None => return,
-                }
-            }
-            MaterialType::Psl => {
-                match self.selected_psl_grade {
-                    Some(grade) => Material::Psl(PslMaterial::new(grade)),
-                    None => return,
-                }
-            }
+        let material = match self.build_material() {
+            Some(m) => m,
+            None => return,
         };
 
+        let total_length_ft = self.total_beam_length(span_ft);
         let mut load_case = EnhancedLoadCase::new("Service Loads");
         load_case.include_self_weight = self.include_self_weight;
 
@@ -1732,19 +1791,11 @@ impl App {
             }
         }
 
-        // Allow self-weight only (no discrete loads) as a valid configuration
-        if load_case.loads.is_empty() && !load_case.include_self_weight { return; }
+        if load_case.loads.is_empty() && !load_case.include_self_weight {
+            return;
+        }
 
-        let adjustment_factors = AdjustmentFactors {
-            load_duration: self.selected_load_duration,
-            wet_service: self.selected_wet_service,
-            temperature: self.selected_temperature,
-            incising: self.selected_incising,
-            repetitive_member: self.selected_repetitive_member,
-            flat_use: self.selected_flat_use,
-            compression_edge_braced: self.compression_edge_braced,
-            unbraced_length_in: None,
-        };
+        let adjustment_factors = self.build_adjustment_factors();
 
         let beam = if self.multi_span_mode && self.span_table.len() > 1 {
             let mut spans = Vec::new();
@@ -1783,74 +1834,53 @@ impl App {
             beam
         };
 
-        let section_deductions = SectionDeductions {
-            notch_location: self.selected_notch_location,
-            notch_depth_left_in: self.notch_depth_left.parse().unwrap_or(0.0),
-            notch_depth_right_in: self.notch_depth_right.parse().unwrap_or(0.0),
-            hole_diameter_in: self.hole_diameter.parse().unwrap_or(0.0),
-            hole_count: self.hole_count.parse().unwrap_or(0),
-        };
         let mut beam = beam;
-        beam.section_deductions = section_deductions;
+        beam.section_deductions = self.build_section_deductions();
 
         self.project.items.insert(beam_id, CalculationItem::Beam(beam));
         self.mark_modified();
     }
 
     fn try_calculate(&mut self) {
-        if !matches!(self.selection, EditorSelection::Beam(_)) { return; }
+        if !matches!(self.selection, EditorSelection::Beam(_)) {
+            return;
+        }
 
         let span_ft = match self.span_ft.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
-            _ => { self.result = None; self.calc_input = None; return; }
+            _ => {
+                self.result = None;
+                self.calc_input = None;
+                return;
+            }
         };
-
-        // Calculate total beam length for load positioning
-        let total_length_ft = if self.multi_span_mode && self.span_table.len() > 1 {
-            self.span_table.iter()
-                .filter_map(|s| s.length_ft.parse::<f64>().ok())
-                .filter(|&v| v > 0.0)
-                .sum()
-        } else {
-            span_ft
-        };
-
         let width_in = match self.width_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
-            _ => { self.result = None; self.calc_input = None; return; }
+            _ => {
+                self.result = None;
+                self.calc_input = None;
+                return;
+            }
         };
         let depth_in = match self.depth_in.parse::<f64>() {
             Ok(v) if v > 0.0 => v,
-            _ => { self.result = None; self.calc_input = None; return; }
-        };
-
-        let material = match self.selected_material_type {
-            MaterialType::SawnLumber => {
-                match (self.selected_species, self.selected_grade) {
-                    (Some(species), Some(grade)) => Material::SawnLumber(WoodMaterial::new(species, grade)),
-                    _ => { self.result = None; self.calc_input = None; return; }
-                }
-            }
-            MaterialType::Glulam => {
-                match (self.selected_glulam_class, self.selected_glulam_layup) {
-                    (Some(stress_class), Some(layup)) => Material::Glulam(GlulamMaterial::new(stress_class, layup)),
-                    _ => { self.result = None; self.calc_input = None; return; }
-                }
-            }
-            MaterialType::Lvl => {
-                match self.selected_lvl_grade {
-                    Some(grade) => Material::Lvl(LvlMaterial::new(grade)),
-                    None => { self.result = None; self.calc_input = None; return; }
-                }
-            }
-            MaterialType::Psl => {
-                match self.selected_psl_grade {
-                    Some(grade) => Material::Psl(PslMaterial::new(grade)),
-                    None => { self.result = None; self.calc_input = None; return; }
-                }
+            _ => {
+                self.result = None;
+                self.calc_input = None;
+                return;
             }
         };
 
+        let material = match self.build_material() {
+            Some(m) => m,
+            None => {
+                self.result = None;
+                self.calc_input = None;
+                return;
+            }
+        };
+
+        let total_length_ft = self.total_beam_length(span_ft);
         let mut load_case = EnhancedLoadCase::new("Service Loads");
         load_case.include_self_weight = self.include_self_weight;
 
@@ -1860,23 +1890,13 @@ impl App {
             }
         }
 
-        // Allow self-weight only (no discrete loads) as a valid configuration
         if load_case.loads.is_empty() && !load_case.include_self_weight {
             self.result = None;
             self.calc_input = None;
             return;
         }
 
-        let adjustment_factors = AdjustmentFactors {
-            load_duration: self.selected_load_duration,
-            wet_service: self.selected_wet_service,
-            temperature: self.selected_temperature,
-            incising: self.selected_incising,
-            repetitive_member: self.selected_repetitive_member,
-            flat_use: self.selected_flat_use,
-            compression_edge_braced: self.compression_edge_braced,
-            unbraced_length_in: None,
-        };
+        let adjustment_factors = self.build_adjustment_factors();
 
         let input = if self.multi_span_mode && self.span_table.len() > 1 {
             let mut spans = Vec::new();
@@ -1885,22 +1905,29 @@ impl App {
             for (i, span_row) in self.span_table.iter().enumerate() {
                 let span_len = match span_row.length_ft.parse::<f64>() {
                     Ok(v) if v > 0.0 => v,
-                    _ => { self.result = None; self.calc_input = None; return; }
+                    _ => {
+                        self.result = None;
+                        self.calc_input = None;
+                        return;
+                    }
                 };
                 supports.push(span_row.left_support);
-                let span = SpanSegment::new(span_len, width_in, depth_in, material.clone()).with_id(span_row.id);
+                let span = SpanSegment::new(span_len, width_in, depth_in, material.clone())
+                    .with_id(span_row.id);
                 spans.push(span);
                 if i == self.span_table.len() - 1 {
                     supports.push(self.right_end_support);
                 }
             }
 
-            let mut input = ContinuousBeamInput::new(self.beam_label.clone(), spans, supports, load_case);
+            let mut input =
+                ContinuousBeamInput::new(self.beam_label.clone(), spans, supports, load_case);
             input.adjustment_factors = adjustment_factors;
             input
         } else {
-            // Single-span mode: use span_ft for length, but respect support type selections
-            let left_support = self.span_table.first()
+            let left_support = self
+                .span_table
+                .first()
                 .map(|s| s.left_support)
                 .unwrap_or(SupportType::Pinned);
             let right_support = self.right_end_support;
@@ -1915,15 +1942,8 @@ impl App {
             input
         };
 
-        let section_deductions = SectionDeductions {
-            notch_location: self.selected_notch_location,
-            notch_depth_left_in: self.notch_depth_left.parse().unwrap_or(0.0),
-            notch_depth_right_in: self.notch_depth_right.parse().unwrap_or(0.0),
-            hole_diameter_in: self.hole_diameter.parse().unwrap_or(0.0),
-            hole_count: self.hole_count.parse().unwrap_or(0),
-        };
         let mut input = input;
-        input.section_deductions = section_deductions;
+        input.section_deductions = self.build_section_deductions();
 
         match calculate_continuous(&input, DesignMethod::Asd) {
             Ok(result) => {
